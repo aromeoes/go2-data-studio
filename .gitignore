@@ -1,0 +1,25 @@
+__pycache__/
+.pytest_cache/
+.ruff_cache/
+.env
+web/node_modules/
+web/dist/
+web/*.tsbuildinfo
+*.db
+*.rrd
+*.lcm
+*.log
+.DS_Store
+
+# Local configuration, credentials and recording sidecars
+.env.*
+!.env.example
+vision.json
+humancli.json
+cloud-credentials.json
+*.db-wal
+*.db-shm
+.venv/
+connection.json
+relay-auth.json
+Go2Spaces/

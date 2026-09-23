@@ -1,0 +1,293 @@
+--- /dev/null
++++ b/go2_setup/diagnostics.py
+@@ -0,0 +1,46 @@
++"""Bounded flight recorder for failures, excluding images and map payloads."""
++
++from collections import deque
++import copy
++import json
++from pathlib import Path
++import time
++import uuid
++
++
++class FailureDiagnostics:
++    def __init__(self, root: Path):
++        self.root = root / "diagnostics"
++        self.samples = deque(maxlen=90)
++
++    def observe(self, telemetry: dict, *, elapsed: float, segment_id=None, error=None):
++        now = time.time()
++        row = {"time": now, "rpc_ms": round(elapsed * 1000, 2), "segment_id": segment_id}
++        if error:
++            row["poll_error"] = error
++        # Copy only operational fields. Never persist camera frames, map cells,
++        # credentials, prompts or image descriptions to a diagnostic report.
++        for name in ("control", "motion", "recording", "transport"):
++            row[name] = copy.deepcopy(telemetry.get(name))
++        row["sensors"] = {
++            name: {**sample, "age_s": now - sample["received"]}
++            for name, sample in telemetry.get("sensors", {}).items()
++            if sample.get("received") is not None
++        }
++        self.samples.append(row)
++
++    def save(self, reason: str, *, segment_id=None) -> Path:
++        self.root.mkdir(parents=True, exist_ok=True)
++        path = self.root / f"connection-{time.time_ns()}-{uuid.uuid4().hex[:8]}.json"
++        path.write_text(
++            json.dumps(
++                {
++                    "reason": reason,
++                    "time": time.time(),
++                    "segment_id": segment_id,
++                    "samples": list(self.samples),
++                },
++                indent=2,
++            )
++        )
++        return path
+--- a/go2_setup/supervisor.py
++++ b/go2_setup/supervisor.py
+@@ -17,6 +17,7 @@
+ 
+ from go2_setup.catalog import Catalog
+ from go2_setup.config import Settings
++from go2_setup.diagnostics import FailureDiagnostics
+ from go2_setup.records import inspect_recording
+ 
+ 
+@@ -42,6 +43,7 @@
+         self.next_retry = 0.0
+         self.stats_cache = None
+         self.stats_at = 0.0
++        self.diagnostics = FailureDiagnostics(settings.root)
+         self.retry_count = 0
+         self.last_discovery = 0.0
+         self.env = (
+@@ -202,8 +204,15 @@
+                     self._lost("The DimOS process exited. Check runtime.log.", process)
+                     continue
+                 try:
++                    poll_started = time.monotonic()
+                     telemetry = self.call("/state", timeout=3)
+-                except (requests.RequestException, ValueError):
++                except (requests.RequestException, ValueError) as error:
++                    self.diagnostics.observe(
++                        self.telemetry,
++                        elapsed=time.monotonic() - poll_started,
++                        segment_id=self.segment["id"] if self.segment else None,
++                        error=str(error),
++                    )
+                     if time.monotonic() - self.last_ok > (
+                         180 if self.connection == "connecting" else 12
+                     ):
+@@ -214,6 +223,11 @@
+                         continue
+                     self.last_ok = time.monotonic()
+                     self.accept_telemetry(telemetry)
++                    self.diagnostics.observe(
++                        self.telemetry,
++                        elapsed=time.monotonic() - poll_started,
++                        segment_id=self.segment["id"] if self.segment else None,
++                    )
+                     odom = telemetry.get("sensors", {}).get("odom", {}).get("received", 0)
+                     if time.time() - odom < 5:
+                         newly_connected = self.connection != "online"
+@@ -249,7 +263,9 @@
+     def _end_segment(self, interrupted=False):
+         if not self.segment:
+             return
+-        writer = {}
++        # An interrupted runtime may already be gone. Preserve the last writer
++        # counters and error instead of overwriting them with an empty object.
++        writer = dict(self.telemetry.get("recording") or {}) if interrupted else {}
+         if not interrupted:
+             writer = self.call("/record/stop", timeout=40)
+         path = Path(self.segment["path"])
+@@ -298,6 +314,17 @@
+         with self.lock:
+             if expected_process is not None and self.process is not expected_process:
+                 return
++            try:
++                report = self.diagnostics.save(
++                    error, segment_id=self.segment["id"] if self.segment else None
++                )
++                if self.segment:
++                    self.catalog.update(
++                        self.segment["id"], interruption_reason=error, diagnostics_path=str(report)
++                    )
++            except OSError:
++                # Diagnostic storage failure must not prevent connection recovery.
++                pass
+             if self.process and self.process.poll() is None:
+                 self._terminate()
+             self._end_segment(interrupted=True)
+--- a/go2_setup/modules.py
++++ b/go2_setup/modules.py
+@@ -64,6 +64,7 @@
+         Module.start(self)
+         self._camera_done = threading.Event()
+         self._battery = {"percent": None, "received": None}
++        self._sensor_health = {}
+         adapted = install_velocity_transport(self.connection)
+         self._motion = {
+             "count": 0,
+@@ -80,17 +81,52 @@
+             ),
+         }
+         self.connection.start()
+-        self.register_disposable(self.connection.lidar_stream().subscribe(self.lidar.publish))
+-        self.register_disposable(self.connection.odom_stream().subscribe(self._publish_tf))
+-        self.register_disposable(self.connection.lowstate_stream().subscribe(self._on_lowstate))
++        self._subscribe_sensor("lidar", self.connection.lidar_stream(), self.lidar.publish)
++        self._subscribe_sensor("odom", self.connection.odom_stream(), self._publish_tf)
++        self._subscribe_sensor("lowstate", self.connection.lowstate_stream(), self._on_lowstate)
+         self.register_disposable(Disposable(self.cmd_vel.subscribe(self._receive_velocity)))
+-        self.register_disposable(self.connection.video_stream().subscribe(self.color_image.publish))
++        self._subscribe_sensor(
++            "color_image", self.connection.video_stream(), self.color_image.publish
++        )
+ 
+         def camera_info_loop():
+             while not self._camera_done.wait(1):
+                 self.camera_info.publish(self.camera_info_static.with_ts(time.time()))
+ 
+         threading.Thread(target=camera_info_loop, daemon=True).start()
++
++    def _subscribe_sensor(self, name, stream, callback):
++        state = {"count": 0, "received": None, "published": None, "error": None}
++        self._sensor_health[name] = state
++
++        def receive(msg):
++            state["count"] += 1
++            state["received"] = time.time()
++            try:
++                callback(msg)
++                state["published"] = time.time()
++            except Exception as error:
++                state["error"] = str(error)
++                raise
++
++        def failed(error):
++            state["error"] = str(error)
++
++        self.register_disposable(stream.subscribe(receive, on_error=failed))
++
++    @rpc
++    def transport_state(self):
++        connection = self.connection
++        peer = getattr(getattr(connection, "conn", None), "pc", None)
++        datachannel = getattr(getattr(connection, "conn", None), "datachannel", None)
++        channel = getattr(getattr(datachannel, "pub_sub", None), "channel", None)
++        return {
++            "sensors": {name: dict(state) for name, state in self._sensor_health.items()},
++            "peer": getattr(peer, "connectionState", None),
++            "ice": getattr(peer, "iceConnectionState", None),
++            "channel": getattr(channel, "readyState", None),
++            "buffered_bytes": getattr(channel, "bufferedAmount", None),
++        }
+ 
+     def _receive_velocity(self, msg):
+         self._motion["count"] += 1
+--- a/go2_setup/runtime.py
++++ b/go2_setup/runtime.py
+@@ -114,6 +114,7 @@
+                             "control": gate.state(),
+                             "motion": connection.motion_state(),
+                             "battery": connection.battery_state(),
++                            "transport": connection.transport_state(),
+                             "replay": bool(args.replay),
+                         }
+                         result["navigation"] = navigation_status.snapshot(result)
+--- /dev/null
++++ b/tests/test_diagnostics.py
+@@ -0,0 +1,88 @@
++import json
++from types import SimpleNamespace
++from unittest.mock import Mock
++
++from reactivex.subject import Subject
++
++from go2_setup.catalog import Catalog
++from go2_setup.config import Settings
++from go2_setup.diagnostics import FailureDiagnostics
++from go2_setup.modules import PassiveGo2Connection
++from go2_setup.supervisor import Supervisor
++
++
++def test_failure_report_bounds_history_and_excludes_payloads(tmp_path):
++    recorder = FailureDiagnostics(tmp_path)
++    telemetry = {
++        "camera": "private image bytes",
++        "map": {"cells": [1, 2, 3]},
++        "sensors": {"odom": {"received": 1, "count": 4}},
++        "recording": {"queued": 5, "dropped": 2},
++        "control": {"mode": "teleop"},
++    }
++    for _ in range(100):
++        recorder.observe(telemetry, elapsed=0.012, segment_id="segment")
++    telemetry["recording"]["queued"] = 999
++    report = json.loads(recorder.save("Odom stopped", segment_id="segment").read_text())
++    assert len(report["samples"]) == 90
++    assert report["samples"][-1]["recording"]["queued"] == 5
++    assert report["samples"][-1]["rpc_ms"] == 12
++    assert "private image bytes" not in json.dumps(report)
++    assert "cells" not in json.dumps(report)
++
++
++def test_interruption_keeps_writer_state_and_reason(tmp_path):
++    settings = Settings(root=tmp_path, env_file=tmp_path / "absent")
++    settings.initialize()
++    catalog = Catalog(tmp_path)
++    supervisor = Supervisor(settings, catalog)
++    supervisor.done.set()
++    supervisor.target = {"ip": "192.168.1.20", "replay": None}
++    supervisor.connection = "online"
++    supervisor.call = Mock(return_value={})
++    supervisor.start_recording(catalog.space("test")["id"])
++    segment = supervisor.segment
++    supervisor.telemetry = {"recording": {"dropped": 7, "queued": 3, "error": "disk error"}}
++    supervisor.diagnostics.observe(supervisor.telemetry, elapsed=0.02, segment_id=segment["id"])
++    supervisor._lost("Position updates stopped")
++    saved = catalog.get(segment["id"])
++    assert saved["writer"] == {"dropped": 7, "queued": 3, "error": "disk error"}
++    assert saved["interruption_reason"] == "Position updates stopped"
++    assert json.loads(open(saved["diagnostics_path"]).read())["segment_id"] == segment["id"]
++    assert supervisor.connection == "reconnecting"
++
++
++def test_source_health_distinguishes_stream_error_from_bridge_silence():
++    connection = object.__new__(PassiveGo2Connection)
++    connection._sensor_health = {}
++    connection.register_disposable = Mock()
++    channel = SimpleNamespace(readyState="open", bufferedAmount=100)
++    peer = SimpleNamespace(connectionState="connected", iceConnectionState="completed")
++    connection.connection = SimpleNamespace(
++        conn=SimpleNamespace(
++            pc=peer, datachannel=SimpleNamespace(pub_sub=SimpleNamespace(channel=channel))
++        )
++    )
++    source = Subject()
++    publish = Mock()
++    connection._subscribe_sensor("lidar", source, publish)
++    source.on_next("frame")
++    source.on_error(ValueError("decode failed"))
++    state = connection.transport_state()
++    assert state["sensors"]["lidar"]["count"] == 1
++    assert state["sensors"]["lidar"]["published"] is not None
++    assert state["sensors"]["lidar"]["error"] == "decode failed"
++    assert state["channel"] == "open"
++    assert state["buffered_bytes"] == 100
++    publish.assert_called_once_with("frame")
++
++
++def test_diagnostic_write_failure_does_not_prevent_reconnection(tmp_path):
++    settings = Settings(root=tmp_path, env_file=tmp_path / "absent")
++    settings.initialize()
++    supervisor = Supervisor(settings, Catalog(tmp_path))
++    supervisor.done.set()
++    supervisor.target = {"ip": "192.168.1.20", "replay": None}
++    supervisor.diagnostics.save = Mock(side_effect=OSError("disk full"))
++    supervisor._lost("Position updates stopped")
++    assert supervisor.connection == "reconnecting"

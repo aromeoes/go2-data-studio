@@ -1,0 +1,19 @@
+[project]
+name = "go2-data-studio"
+version = "0.1.0"
+requires-python = ">=3.12"
+dependencies = ["fastapi>=0.129", "uvicorn>=0.40", "requests>=2.32", "pydantic>=2.12", "python-dotenv>=1.2"]
+
+[project.optional-dependencies]
+anthropic = ["langchain-anthropic"]
+google = ["langchain-google-genai"]
+ollama = ["langchain-ollama"]
+
+[project.scripts]
+go2-setup = "go2_setup.api:main"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
