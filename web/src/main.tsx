@@ -27,6 +27,7 @@ import {
 } from "lucide-react";
 import "./style.css";
 import { robot } from "./sdk";
+import { useControllerStop } from "./useControllerStop";
 
 import type { Item, State } from "./types";
 import { MapCanvas } from "./MapCanvas";
@@ -195,6 +196,7 @@ export function App() {
     setPressed([]);
     void action("stop", () => api("/stop"));
   };
+  useControllerStop(() => robot.inputSource === "controller", halt);
   const mode = async (next: string) => {
     if (next !== "idle") setControlView(next);
     robot.disarm();
@@ -458,7 +460,7 @@ export function App() {
           <p>
             Original recordings
             <br />
-            stay on this Mac.
+            stay on this device.
           </p>
           <div className="version">
             DimOS 0.0.14 <span>{state.dimos_sha.slice(0, 7)}</span>
@@ -1094,8 +1096,8 @@ export function App() {
                         <td>
                           <div className="row-actions">
                             <button
-                              title="Show file in Finder"
-                              aria-label="Show recording in Finder"
+                              title="Show file in file manager"
+                              aria-label="Show recording in file manager"
                               onClick={() => open(s.id, "raw")}
                             >
                               <Folder size={15} />

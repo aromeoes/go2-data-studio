@@ -4,6 +4,10 @@ A local web application for connecting a Unitree Go2, recording spaces, generati
 
 The custom interface uses the DimOS Web SDK. DimOS provides robot connectivity, mapping, A* navigation, frontier exploration, SQLite storage and the MCP agent behind HumanCLI. The upstream Cockpit interface is not launched.
 
+## Desktop preview
+
+An Electron development preview adds local backend management and analog controller input for standalone Mac and Steam Deck operation. It currently requires a separately installed DimOS runtime. See [desktop setup, validation and remaining release work](docs/DESKTOP.md).
+
 ## Features
 
 * Teleoperation with W/S for forward/backward, A/D for turning, and Q/E for sideways movement.

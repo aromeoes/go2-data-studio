@@ -8,6 +8,7 @@ import subprocess
 import threading
 import time
 import secrets
+import os
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse, Response
@@ -26,6 +27,7 @@ from go2_setup.records import inspect_recording
 from go2_setup.supervisor import Supervisor
 from go2_setup.sdk_relay import ConsoleRelay
 from go2_setup.sdk_control import CommandOwner
+from go2_setup.platform_files import reveal_file
 
 
 class ConnectBody(BaseModel):
@@ -105,6 +107,7 @@ def create_app(settings: Settings | None = None):
     cloud = CloudBackups(settings, catalog)
     import_lock = threading.Lock()
     command_owner = CommandOwner()
+    desktop_closing = False
 
     @asynccontextmanager
     async def lifespan(app):
@@ -127,6 +130,17 @@ def create_app(settings: Settings | None = None):
 
     @app.middleware("http")
     async def local_only(request: Request, call_next):
+        if settings.desktop_token:
+            desktop = secrets.compare_digest(
+                request.headers.get("X-Go2-Desktop", ""), settings.desktop_token
+            )
+            bridge = secrets.compare_digest(
+                request.headers.get("authorization", ""), "Bearer " + supervisor.token
+            )
+            if not desktop and not bridge:
+                return JSONResponse({"detail": "Desktop session required"}, status_code=403)
+        if desktop_closing and request.method not in {"GET", "HEAD"}:
+            return JSONResponse({"detail": "Application is closing"}, status_code=409)
         host = request.headers.get("host", "").split(":")[0]
         origin = request.headers.get("origin")
         allowed_origins = {f"http://127.0.0.1:{settings.port}", f"http://localhost:{settings.port}"}
@@ -168,6 +182,35 @@ def create_app(settings: Settings | None = None):
             "cloud": cloud.status(),
             "agent": agent.snapshot(),
         }
+
+    def desktop_only(request):
+        if not settings.desktop_token or not secrets.compare_digest(
+            request.headers.get("X-Go2-Desktop", ""), settings.desktop_token
+        ):
+            raise HTTPException(403, "Desktop session required")
+
+    @app.get("/api/desktop/status")
+    def desktop_status(request: Request):
+        desktop_only(request)
+        with supervisor.lock:
+            return {
+                "pid": os.getpid(),
+                "dimos_sha": MAIN_SHA,
+                "connected": supervisor.target is not None,
+                "recording": supervisor.segment is not None,
+            }
+
+    @app.post("/api/desktop/prepare-quit")
+    def desktop_quit(request: Request):
+        nonlocal desktop_closing
+        desktop_only(request)
+        with supervisor.lock:
+            if supervisor.target is not None or supervisor.session or supervisor.segment:
+                raise ValueError(
+                    "Save the recording and disconnect using the dashboard before quitting"
+                )
+            desktop_closing = True
+        return {"ok": True}
 
     @app.get("/api/sdk")
     def sdk_info(response: Response):
@@ -261,6 +304,8 @@ def create_app(settings: Settings | None = None):
     @app.post("/api/connect")
     def connect(body: ConnectBody):
         with supervisor.lock:
+            if desktop_closing:
+                raise ValueError("Application is closing")
             replay = None
             if body.segment_id:
                 segment = catalog.get(body.segment_id, "segment")
@@ -452,7 +497,7 @@ def create_app(settings: Settings | None = None):
                 start_new_session=True,
             )
         else:
-            subprocess.run(["open", "-R", str(path)], check=True, timeout=10)
+            reveal_file(path)
         return {"ok": True}
 
     web = Path(__file__).resolve().parent.parent / "web/dist"
@@ -468,7 +513,7 @@ def main():
         try:
             fcntl.flock(instance_lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError:
-            raise SystemExit("Ya hay una consola usando esta carpeta de datos")
+            raise SystemExit("Another console is already using this data folder")
         uvicorn.run(create_app(settings), host="127.0.0.1", port=settings.port)
 
 

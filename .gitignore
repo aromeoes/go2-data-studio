@@ -23,3 +23,6 @@ cloud-credentials.json
 connection.json
 relay-auth.json
 Go2Spaces/
+
+desktop/node_modules/
+desktop/dist/

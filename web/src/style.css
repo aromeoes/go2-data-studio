@@ -1809,3 +1809,117 @@ button.danger:hover:not(:disabled) {
   font-size: 11px;
   opacity: 0.8;
 }
+
+.controller-panel {
+  padding: 12px;
+  border: 1px solid var(--line, #354137);
+  border-radius: 10px;
+  text-align: left;
+}
+.controller-panel small {
+  display: block;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.controller-panel p {
+  font-size: 12px;
+  line-height: 1.5;
+}
+.controller-legend {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  font-size: 11px;
+}
+@media (max-width: 1280px) and (max-height: 850px) {
+  button,
+  select {
+    min-height: 36px;
+  }
+  .controller-legend {
+    gap: 6px;
+  }
+}
+
+/* Handheld landscape: keep movement controls near the map at 1280 x 800. */
+@media (min-width: 1001px) and (max-width: 1280px) and (max-height: 850px) {
+  .rail {
+    width: 185px;
+    padding: 16px 12px;
+  }
+  .brand {
+    padding-bottom: 24px;
+    font-size: 10px;
+    gap: 8px;
+  }
+  main {
+    padding: 0 18px;
+  }
+  header {
+    height: 52px;
+    position: sticky;
+    top: 0;
+    z-index: 5;
+    background: #141917;
+  }
+  .heading {
+    padding: 12px 0;
+  }
+  .heading h1 {
+    font-size: 23px;
+    margin: 6px 0;
+  }
+  .heading .eyebrow {
+    font-size: 8px;
+  }
+  .workspace {
+    grid-template-columns: minmax(0, 1fr) 305px;
+    gap: 12px;
+  }
+  .panel-head {
+    min-height: 38px;
+    padding: 9px 12px;
+  }
+  .map-panel {
+    min-height: 380px;
+  }
+  .map-surface {
+    min-height: 320px;
+  }
+  .control-panel {
+    gap: 8px;
+  }
+  .camera-feed {
+    height: 80px;
+    gap: 6px;
+  }
+  .camera-feed > svg {
+    width: 18px;
+    height: 18px;
+  }
+  .mode-switch {
+    margin: 8px 10px 0;
+  }
+  .mode-switch button {
+    flex-direction: row;
+    padding: 6px 4px;
+    gap: 4px;
+  }
+  .teleop {
+    padding: 4px 12px;
+  }
+  .teleop p {
+    margin: 6px 0;
+  }
+  .teleop small {
+    margin: 6px 0;
+  }
+  .posture {
+    margin: 6px 12px 10px;
+  }
+  .controller-panel {
+    padding: 8px;
+  }
+}

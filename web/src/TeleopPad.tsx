@@ -1,4 +1,6 @@
-import type { PointerEvent } from "react";
+import { useState, type PointerEvent } from "react";
+import { ControllerPanel } from "./ControllerPanel";
+import { robot } from "./sdk";
 
 export function TeleopPad({
   armed,
@@ -19,6 +21,9 @@ export function TeleopPad({
   press: (key: string) => void;
   release: (key: string) => void;
 }) {
+  const [source, setSource] = useState<"keyboard" | "controller">(
+    robot.inputSource || "keyboard",
+  );
   const rows = [
     [
       ["q", "←", "Move left"],
@@ -38,10 +43,28 @@ export function TeleopPad({
   };
   return (
     <div className="teleop">
+      <label className="teleop-speed">
+        Input
+        <select
+          aria-label="Control input"
+          value={source}
+          disabled={armed}
+          onChange={(event) => {
+            const next = event.target.value as "keyboard" | "controller";
+            robot.selectInput(next);
+            setSource(next);
+          }}
+        >
+          <option value="keyboard">Keyboard / touch</option>
+          <option value="controller">Controller</option>
+        </select>
+      </label>
       <p role="status">
         {armed
-          ? "Controls enabled. Hold a key or button to move."
-          : "Enable controls to use the keyboard or buttons."}
+          ? source === "controller"
+            ? "Controls enabled. Hold LB and move a stick."
+            : "Controls enabled. Hold a key or button to move."
+          : "Select an input and enable controls to move."}
       </p>
       <label className="teleop-speed">
         Forward speed
@@ -56,45 +79,54 @@ export function TeleopPad({
           <option value={1}>1.0 m/s · Boost</option>
         </select>
       </label>
-      {rows.map((row, index) => (
-        <div className="key-row" key={index}>
-          {row.map(([key, arrow, label]) => (
-            <button
-              key={key}
-              className={`drive-key ${pressed.includes(key) ? "pressed" : ""}`}
-              disabled={disabled || !armed}
-              aria-label={`${key.toUpperCase()}: ${label}`}
-              aria-pressed={pressed.includes(key)}
-              onPointerDown={(event) => {
-                if (event.button !== 0) return;
-                event.preventDefault();
-                event.currentTarget.setPointerCapture(event.pointerId);
-                press(key);
-              }}
-              onPointerUp={(event) => end(event, key)}
-              onPointerCancel={(event) => end(event, key)}
-              onLostPointerCapture={() => release(key)}
-              onKeyDown={(event) => {
-                if (event.key === "Enter") {
+      {source === "controller" ? (
+        <ControllerPanel
+          armed={armed}
+          speed={speed}
+          input={(motion) => robot.gamepad(motion)}
+          lost={() => robot.disarm()}
+        />
+      ) : (
+        rows.map((row, index) => (
+          <div className="key-row" key={index}>
+            {row.map(([key, arrow, label]) => (
+              <button
+                key={key}
+                className={`drive-key ${pressed.includes(key) ? "pressed" : ""}`}
+                disabled={disabled || !armed}
+                aria-label={`${key.toUpperCase()}: ${label}`}
+                aria-pressed={pressed.includes(key)}
+                onPointerDown={(event) => {
+                  if (event.button !== 0) return;
                   event.preventDefault();
+                  event.currentTarget.setPointerCapture(event.pointerId);
                   press(key);
-                }
-              }}
-              onKeyUp={(event) => {
-                if (event.key === "Enter") {
-                  event.preventDefault();
-                  release(key);
-                }
-              }}
-              onBlur={() => release(key)}
-            >
-              <span>
-                {key.toUpperCase()} {arrow}
-              </span>
-            </button>
-          ))}
-        </div>
-      ))}
+                }}
+                onPointerUp={(event) => end(event, key)}
+                onPointerCancel={(event) => end(event, key)}
+                onLostPointerCapture={() => release(key)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter") {
+                    event.preventDefault();
+                    press(key);
+                  }
+                }}
+                onKeyUp={(event) => {
+                  if (event.key === "Enter") {
+                    event.preventDefault();
+                    release(key);
+                  }
+                }}
+                onBlur={() => release(key)}
+              >
+                <span>
+                  {key.toUpperCase()} {arrow}
+                </span>
+              </button>
+            ))}
+          </div>
+        ))
+      )}
       <small>Release to stop · Space or Esc to halt</small>
       <button
         className={armed ? "armed" : "primary"}

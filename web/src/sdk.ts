@@ -1,3 +1,4 @@
+import { AnalogInput, type Motion } from "./gamepad";
 /** Adapter pinned to DimOS c1c3cdc. Browser robot traffic uses the SDK. */
 import {
   connect,
@@ -17,6 +18,8 @@ export class RobotSDK {
   error = "";
   onChange = () => {};
   onArmed = (_armed: boolean) => {};
+  private analog = new AnalogInput();
+  private analogHeld = false;
   private generation = 0;
   private lastStateAt = 0;
   private pending = new Map<
@@ -42,7 +45,15 @@ export class RobotSDK {
     const hooks = teleopHooks(session);
     this.machine = new TeleopMachine(
       { maxLinear: 0.5, maxAngular: 0.5, boost: 1, publishHz: 15 },
-      hooks,
+      {
+        control: (message) => hooks.control(message),
+        datagram: (message) => {
+          hooks.datagram(this.analog.map(message));
+          if (this.analog.selected && this.analogHeld && this.analog.stale()) {
+            queueMicrotask(() => this.disarm());
+          }
+        },
+      },
     );
     this.cleanups.push(hooks.onMsg((msg) => this.machine?.onRelayMsg(msg)));
     this.cleanups.push(
@@ -200,15 +211,36 @@ export class RobotSDK {
     });
   }
 
+  get inputSource(): "keyboard" | "controller" {
+    return this.analog.selected ? "controller" : "keyboard";
+  }
+  selectInput(source: "keyboard" | "controller") {
+    this.disarm();
+    this.analog.selected = source === "controller";
+  }
+  gamepad(value: Motion) {
+    if (!this.analog.selected || this.machine?.getSnapshot().phase !== "armed")
+      return;
+    this.analog.update(value);
+    const moving = !!(value.vx || value.vy || value.wz);
+    // A single held SDK motion key drives its existing 15 Hz scheduler. Only
+    // nonzero motion datagrams are transformed; lease and zeroing stay upstream.
+    if (moving && !this.analogHeld) this.machine.keyDown("KeyW");
+    if (!moving && this.analogHeld) this.machine.keyUp("KeyW");
+    this.analogHeld = moving;
+  }
   arm(speed: number) {
     if (!this.ready || !this.machine) throw Error("DimOS SDK is disconnected");
     this.machine.config.maxLinear = speed;
     this.machine.arm();
   }
   disarm() {
+    this.analog.reset();
+    this.analogHeld = false;
     this.machine?.disarm("Controls released");
   }
   keys(pressed: Set<string>) {
+    if (this.analog.selected) return;
     const aliases: Record<string, string> = {
       ArrowUp: "w",
       ArrowDown: "s",
