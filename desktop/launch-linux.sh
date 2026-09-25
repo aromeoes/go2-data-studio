@@ -11,4 +11,9 @@ if [[ -n "${SYSTEM_LD_LIBRARY_PATH:-}" ]]; then
 else
   unset LD_LIBRARY_PATH
 fi
+# Steam's GTK input module can commit each character twice in Electron.
+# Preserve user-selected IMEs outside the Steam-provided module.
+if [[ "${GTK_IM_MODULE:-}" == "Steam" || "${GTK_IM_MODULE:-}" == "steam" ]]; then
+  export GTK_IM_MODULE=simple
+fi
 exec "$app_dir/go2-data-studio" "$@"

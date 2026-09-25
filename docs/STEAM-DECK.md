@@ -67,6 +67,14 @@ The launcher excludes Steam's overlay preload and alternate library paths from
 Electron: those caused a Chromium GPU-process startup crash on this Deck. Steam
 Input variables remain intact. This app does not depend on Steam's injected overlay.
 
+The launcher also replaces Steam's injected GTK text-input module with `simple`
+for this app. This addresses doubled characters in Electron on the Deck while
+preserving an explicitly selected non-Steam input method. See the
+[matching upstream report](https://github.com/Heroic-Games-Launcher/HeroicGamesLauncher/issues/4250).
+The September 25 launcher patch was applied to the installed app after the
+original 0.3.0 archive was created; rebuild from current source to include it.
+
+
 ## Build
 
 Build natively on Linux x86_64, with uv 0.12.19 and Node 24.21.0 in PATH. The
