@@ -28,6 +28,10 @@ cd "$repo_dir"
   --output desktop/runtime --dimos-archive "$build_dir/inputs/dimos.tar.gz" \
   --deno-archive "$build_dir/inputs/deno.zip" --turbojpeg /usr/lib/libturbojpeg.so.0
 cp -L /usr/lib/libportaudio.so.2 desktop/runtime/lib/libportaudio.so.2
+mkdir -p desktop/runtime/licenses
+cp /usr/share/licenses/portaudio/LICENSE.txt desktop/runtime/licenses/PortAudio-LICENSE.txt
+cp /usr/share/licenses/libjpeg-turbo/LICENSE.md desktop/runtime/licenses/libjpeg-turbo-LICENSE.md
+cp /usr/share/licenses/libjpeg-turbo/README.ijg desktop/runtime/licenses/libjpeg-turbo-README.ijg
 curl -fL https://raw.githubusercontent.com/denoland/deno/v2.9.6/LICENSE.md -o desktop/runtime/DENO-LICENSE.md
 DENO_DIR="$PWD/desktop/runtime/deno-cache" desktop/runtime/bin/deno cache \
   --frozen --node-modules-dir=none --config vendor/dimos-web/deno.json vendor/dimos-web/relay/main.ts

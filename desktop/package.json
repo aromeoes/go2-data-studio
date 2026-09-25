@@ -39,6 +39,10 @@
       {
         "from": "../vendor/dimos-web",
         "to": "app/vendor/dimos-web"
+      },
+      {
+        "from": "licenses",
+        "to": "licenses"
       }
     ],
     "mac": {
