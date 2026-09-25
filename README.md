@@ -4,9 +4,9 @@ A local web application for connecting a Unitree Go2, recording spaces, generati
 
 The custom interface uses the DimOS Web SDK. DimOS provides robot connectivity, mapping, A* navigation, frontier exploration, SQLite storage and the MCP agent behind HumanCLI. The upstream Cockpit interface is not launched.
 
-## Mac application
+## Desktop applications
 
-The Apple Silicon Electron app includes Python, DimOS, robot and mapping dependencies, and the Web SDK relay. Open it from Applications without a separate runtime or terminal. See [Mac installation and build instructions](docs/MAC.md). Steam Deck work is paused; the Linux build remains a development preview. See [desktop controls and lifecycle](docs/DESKTOP.md).
+The Apple Silicon Mac and Steam Deck Electron apps include Python, DimOS, robot and mapping dependencies, and the Web SDK relay. Each device runs independently. Open the Mac app from Applications or the Deck app from Steam. See [Mac installation](docs/MAC.md), [Steam Deck installation and controls](docs/STEAM-DECK.md), and [desktop lifecycle](docs/DESKTOP.md).
 
 ## Features
 
@@ -20,7 +20,7 @@ The Apple Silicon Electron app includes Python, DimOS, robot and mapping depende
 
 ## Requirements
 
-The requirements below apply to source development. The Mac application bundles its runtime. Linux and Windows operation has not been validated.
+The requirements below apply to source development. The Mac and Steam Deck applications bundle their runtimes. Windows operation has not been validated.
 
 You need:
 

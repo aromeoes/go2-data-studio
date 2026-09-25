@@ -1,6 +1,6 @@
 {
   "name": "go2-data-studio-desktop",
-  "version": "0.2.1",
+  "version": "0.3.0",
   "private": true,
   "description": "Standalone Go2 Data Studio desktop host",
   "main": "main.cjs",
@@ -55,7 +55,18 @@
       }
     },
     "linux": {
-      "category": "Utility"
+      "category": "Utility",
+      "icon": "assets/icon.png",
+      "executableName": "go2-data-studio",
+      "extraResources": [
+        {
+          "from": "runtime",
+          "to": "runtime"
+        }
+      ],
+      "target": [
+        "dir"
+      ]
     },
     "dmg": {
       "title": "Go2 Data Studio",

@@ -1,4 +1,4 @@
-"""Assemble a relocatable macOS runtime from a validated dependency environment.
+"""Assemble a relocatable desktop runtime from a validated dependency environment.
 
 DimOS source comes exclusively from the pinned GitHub archive. The configured
 venv supplies installed third-party distributions, never its editable sources.
@@ -9,7 +9,6 @@ import argparse
 import hashlib
 import importlib.metadata
 import json
-from pathlib import Path
 import platform
 import shutil
 import subprocess
@@ -17,6 +16,7 @@ import sys
 import sysconfig
 import tarfile
 import zipfile
+from pathlib import Path
 
 SHA = "c1c3cdc9d2ee54ca72259465688395699d7d99a2"
 
@@ -37,8 +37,12 @@ def ignore(directory, names):
 
 
 def assemble(args):
-    if platform.system() != "Darwin" or platform.machine() != "arm64":
-        raise SystemExit("This runtime builder currently supports macOS Apple Silicon only.")
+    platform_target = {
+        ("Darwin", "arm64"): ("darwin", "arm64"),
+        ("Linux", "x86_64"): ("linux", "x64"),
+    }.get((platform.system(), platform.machine()))
+    if platform_target is None:
+        raise SystemExit("Supported runtime targets: macOS Apple Silicon and Linux x86_64.")
     root = args.output.resolve()
     if root.exists():
         raise SystemExit(f"Output already exists: {root}. Choose a fresh directory.")
@@ -103,7 +107,10 @@ def assemble(args):
     # dependency. Its transitive dependencies are collected by relocate-native.py.
     lib = root / "lib"
     lib.mkdir()
-    shutil.copy2(args.turbojpeg, lib / "libturbojpeg.dylib")
+    shutil.copy2(
+        args.turbojpeg,
+        lib / ("libturbojpeg.dylib" if platform_target[0] == "darwin" else "libturbojpeg.so.0"),
+    )
     packages = sorted(
         {
             f"{d.metadata['Name']}=={d.version}"
@@ -114,8 +121,8 @@ def assemble(args):
     manifest = {
         "format": 1,
         "dimos_sha": SHA,
-        "platform": "darwin",
-        "arch": "arm64",
+        "platform": platform_target[0],
+        "arch": platform_target[1],
         "python": platform.python_version(),
         "deno": run(str(root / "bin/deno"), "--version").splitlines()[0],
         "source_sha256": hashlib.sha256(args.dimos_archive.read_bytes()).hexdigest(),

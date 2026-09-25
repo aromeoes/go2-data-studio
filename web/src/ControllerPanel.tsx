@@ -98,6 +98,7 @@ export function ControllerPanel({
         <span>LB · Hold to drive</span>
         <span>B · Stop</span>
       </div>
+      {!armed && <small className="controller-navigation-hint">D-pad · Focus · A · Select · Right stick · Scroll. Steam + X opens the Deck keyboard.</small>}
     </div>
   );
 }

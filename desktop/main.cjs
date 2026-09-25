@@ -4,6 +4,7 @@ const path = require('node:path');
 const { Backend, validateRuntime } = require('./backend.cjs');
 
 let window, backend, quitting = false, checkingQuit = false, blocker;
+const steamLaunch = process.argv.includes('--steam');
 app.setName('Go2 Data Studio');
 if (!app.requestSingleInstanceLock()) app.quit();
 else {
@@ -66,6 +67,7 @@ async function start() {
   window = new BrowserWindow({
     width: 1280, height: 800, minWidth: 800, minHeight: 600,
     backgroundColor: '#141917', title: 'Go2 Data Studio', show: false,
+    fullscreen: steamLaunch, autoHideMenuBar: process.platform === 'linux',
     webPreferences: { session: webSession, nodeIntegration: false, contextIsolation: true, sandbox: true },
   });
   window.webContents.setWindowOpenHandler(({ url }) => {
@@ -103,7 +105,7 @@ async function start() {
   powerMonitor.on('suspend', () => { void pause(); });
   powerMonitor.on('resume', () => { void pause(); });
   powerMonitor.on('lock-screen', () => { void pause(); });
-  await window.loadURL(backend.origin);
+  await window.loadURL(backend.origin + (steamLaunch ? '/?input=controller' : '/'));
 }
 async function pause() {
   try { await backend?.stopMotion(); } catch { /* Robot-side expiry remains authoritative. */ }
@@ -129,3 +131,6 @@ async function requestQuit() {
 }
 app.on('before-quit', event => { if (!quitting) { event.preventDefault(); void requestQuit(); } });
 app.on('window-all-closed', () => { if (quitting) app.quit(); });
+// Steam and desktop session managers can request termination without a window
+// close event. Apply the same guard; SIGKILL and power loss remain unpreventable.
+for (const signal of ['SIGTERM', 'SIGINT']) process.on(signal, () => { void requestQuit(); });

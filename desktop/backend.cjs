@@ -14,7 +14,7 @@ function validateRuntime(runtime) {
     const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'));
     if (manifest.format !== 1 || manifest.dimos_sha !== DIMOS_SHA ||
         manifest.platform !== process.platform || manifest.arch !== process.arch) {
-      throw new Error('The bundled DimOS runtime does not match this application or Mac.');
+      throw new Error('The bundled DimOS runtime does not match this application or computer.');
     }
     accessSync(path.join(runtime, 'bin', 'deno'), constants.X_OK);
     return python;
@@ -40,6 +40,12 @@ function runtimeEnvironment(runtime, data, source, inherited = process.env) {
     DIMOS_RUNTIME: runtime, GO2_SPACES: data,
     DIMOS_RUN_LOG_DIR: path.join(data, 'logs'), NUMBA_CACHE_DIR: path.join(data, 'numba-cache'),
   });
+  if (bundled && process.platform === 'linux') {
+    // Steam injects its game runtime and overlay loader settings. Python/DimOS
+    // must use the shipped libraries, not Steam's alternate C++/OpenSSL stack.
+    delete env.LD_PRELOAD;
+    env.LD_LIBRARY_PATH = path.join(runtime, 'lib');
+  }
   if (bundled) {
     // Deno writes compilation/cache metadata. Seed a private writable cache,
     // keeping the installed application itself immutable.

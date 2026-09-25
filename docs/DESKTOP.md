@@ -1,9 +1,8 @@
 # Desktop application
 
-The Mac application now includes its local runtime. See [Mac installation and
-build details](MAC.md). Steam Deck work is paused; Linux remains a development
-preview requiring an external runtime. The milestone notes below describe the
-original preview.
+The Mac and Steam Deck applications include their local runtime. See
+[Mac build details](MAC.md) and [Steam Deck installation and validation](STEAM-DECK.md).
+The source development launcher can still use an external pinned runtime.
 
 Goal: the Steam Deck or Mac independently runs the interface, DimOS, robot
 connection, recording and mapping. There is no Deck-to-Mac pairing mode.
@@ -28,11 +27,11 @@ connection, recording and mapping. There is no Deck-to-Mac pairing mode.
   The backend then locks out new connections before acknowledging shutdown.
 * Linux file-manager support and a compact landscape layout for 1280 x 800.
 
-## Run the preview
+## Run from source
 
-Build the web application first. The desktop preview currently requires an
-already-installed pinned DimOS checkout and its configured `.venv`, just as the
-browser application does. It is not yet a self-contained runtime distribution.
+Build the web application first. The source launcher uses an already-installed
+pinned DimOS runtime and its configured `.venv`. Packaged apps use their embedded
+runtime and do not show a runtime chooser.
 
 ```sh
 cd web
@@ -60,9 +59,8 @@ physical control performance.
 
 Choose Controller in the Teleop input selector. Use Steam Input's standard
 gamepad layout on Deck. A controller button press may be needed before the
-browser exposes it. Touch/trackpad or keyboard still navigates the interface;
-full D-pad interface navigation and Deck-specific gyro/back-button mappings are
-not implemented in this milestone.
+browser exposes it. D-pad and A navigate controls while disarmed; the right stick scrolls. Touch,
+trackpad and keyboard also work. Gyro and back-button mappings are not implemented.
 
 ## Build and checks
 
@@ -76,7 +74,8 @@ npm run package:linux
 ```
 
 The Mac package command produces a DMG with the embedded runtime. The Linux
-command still produces an unpacked development preview without its runtime.
+command produces an unpacked app with its embedded runtime. Assemble that runtime
+first using `desktop/build-linux.sh` as described in STEAM-DECK.md.
 Apple Silicon is the Mac package target; Intel support is not yet validated.
 
 Backend tests cover the desktop session credential, guarded shutdown, prevention
@@ -87,21 +86,14 @@ failed shutdown guard never signals the backend process.
 
 ## Required before a standalone release
 
-1. Build a relocatable, versioned DimOS/Python/relay runtime distribution for Linux
-   x86-64. The macOS arm64 distribution is implemented in MAC.md. An existing development virtualenv cannot simply be
-   copied into the application: interpreter links, entrypoint paths and native
-   libraries must be validated after relocation.
-2. Test directly on Steam Deck: standard Gamepad exposure in Desktop and Gaming
-   modes, WebTransport, Wi-Fi connection, sustained recording, navigation latency,
-   storage throughput, memory, temperatures and battery use. Do not assume its GPU
-   accelerates the same mapping backend used on another machine.
-3. Add installation and update handling, macOS signing/notarization, and test a
-   SteamOS-compatible distribution such as Flatpak including required permissions.
-4. Add complete controller navigation and on-screen keyboard behavior. Extend
-   input mappings only after testing the built-in Deck controls.
-5. Validate physical suspend/loss-of-link behavior with an operator. Idle sleep
-   inhibition and software stop requests cannot guarantee safety during forced
-   sleep, power loss or firmware faults. No automatic posture command is sent.
+1. Test the physical Go2 on each platform with an operator: controller input,
+   sustained recording, navigation latency, storage throughput, thermals and battery.
+2. Validate Steam Input layouts and the keyboard with the operator. Gaming Mode
+   application launch is verified.
+3. Add automatic updates, macOS signing/notarization and CI-produced runtime artifacts.
+4. Validate physical suspend/loss-of-link behavior with an operator. Idle sleep
+   inhibition and software stops cannot guarantee safety during forced sleep,
+   power loss or firmware faults. No automatic posture command is sent.
 
 The application does not automatically restart a failed backend. If the desktop
 process itself crashes, the backend may remain alive to avoid an unguarded robot
@@ -118,3 +110,6 @@ no robot credentials and a fresh data folder. The interface loaded disconnected,
 WebTransport and Gamepad APIs were present, Node was unavailable in the renderer,
 and shutdown completed through the backend guard. This checks local application
 startup, not physical controller behavior, mapping throughput or Go2 movement.
+
+The subsequent Steam Deck build passed 131 tests and packaged replay/map checks.
+See [Steam Deck validation](STEAM-DECK.md) for the platform-specific evidence and limits.

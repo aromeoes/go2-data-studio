@@ -25,9 +25,15 @@ import {
   Wifi,
   X,
 } from "lucide-react";
+import "@fontsource-variable/inter";
 import "./style.css";
 import { robot } from "./sdk";
+// Steam launch selects the input device only. Arming remains an explicit action.
+if (new URLSearchParams(window.location.search).get("input") === "controller") {
+  robot.selectInput("controller");
+}
 import { useControllerStop } from "./useControllerStop";
+import { useControllerNavigation } from "./useControllerNavigation";
 
 import type { Item, State } from "./types";
 import { MapCanvas } from "./MapCanvas";
@@ -113,6 +119,7 @@ export function App() {
   const [disconnectDialog, setDisconnectDialog] = useState(false);
   const [parked, setParked] = useState(false);
   const [armed, setArmed] = useState(false);
+  useControllerNavigation(() => robot.inputSource === "controller" && !armed);
   const [teleopSpeed, setTeleopSpeed] = useState(0.5);
   const [pressed, setPressed] = useState<string[]>([]);
   const emitTeleop = useRef<(() => void) | null>(null);
@@ -1312,7 +1319,7 @@ export function App() {
         <footer>
           <span>SPACE SETUP / DIMENSIONAL</span>
           <span>Preview map ≠ map validated for patrol</span>
-          <span>LOCAL · MAC + WI-FI</span>
+          <span>LOCAL · WI-FI</span>
         </footer>
       </main>
       {notice && (

@@ -48,6 +48,15 @@ test('bundled backend excludes development paths and seeds a writable relay cach
   assert.equal(readFileSync(path.join(env.DENO_DIR, 'seed'), 'utf8'), 'user cache');
 });
 
+test('Linux backend isolates its libraries from Steam overlay injection', {skip: process.platform !== 'linux'}, t => {
+  const root = runtimeFixture(t);
+  const env = runtimeEnvironment(root, path.join(root, 'data'), '/app', {
+    LD_PRELOAD: '/steam/gameoverlayrenderer.so', LD_LIBRARY_PATH: '/steam/runtime/lib',
+  });
+  assert.equal(env.LD_PRELOAD, undefined);
+  assert.equal(env.LD_LIBRARY_PATH, path.join(root, 'lib'));
+});
+
 function fixture() {
   const backend = new Backend({ runtime: '/unused', data: '/unused', source: '/unused' });
   backend.child = new EventEmitter();

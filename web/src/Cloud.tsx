@@ -26,7 +26,7 @@ export function CloudPanel({
       <p>
         {cloud.account?.email ||
           (cloud.configured
-            ? "Account saved on this Mac"
+            ? "Account saved on this device"
             : "Back up your recordings to the cloud.")}
       </p>
       {cloud.login ? (

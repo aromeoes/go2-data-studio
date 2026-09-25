@@ -1,5 +1,6 @@
 :root {
   font-family:
+    "Inter Variable",
     Inter,
     -apple-system,
     BlinkMacSystemFont,
@@ -9,6 +10,9 @@
   background: #141917;
   font-synthesis: none;
   font-weight: 400;
+  color-scheme: dark;
+  scrollbar-color: #435249 #141917;
+  scrollbar-width: thin;
   --bg: #141917;
   --panel: #1c231f;
   --line: #354137;
@@ -1822,6 +1826,12 @@ button.danger:hover:not(:disabled) {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+.controller-panel .controller-navigation-hint {
+  white-space: normal;
+  overflow: visible;
+  text-overflow: clip;
+  line-height: 1.5;
 }
 .controller-panel p {
   font-size: 12px;
