@@ -1,4 +1,9 @@
-# Standalone desktop development preview
+# Desktop application
+
+The Mac application now includes its local runtime. See [Mac installation and
+build details](MAC.md). Steam Deck work is paused; Linux remains a development
+preview requiring an external runtime. The milestone notes below describe the
+original preview.
 
 Goal: the Steam Deck or Mac independently runs the interface, DimOS, robot
 connection, recording and mapping. There is no Deck-to-Mac pairing mode.
@@ -64,15 +69,15 @@ not implemented in this milestone.
 ```sh
 cd desktop
 npm test
+# First assemble the embedded runtime as described in MAC.md.
 npm run package:mac
 # On a Linux build host:
 npm run package:linux
 ```
 
-The package commands produce unpacked desktop previews. They include the UI,
-application backend source and vendored relay, but not Python or the DimOS native
-dependency environment. They are not production installers. Apple Silicon is
-currently the Mac package target; Intel support is not yet validated.
+The Mac package command produces a DMG with the embedded runtime. The Linux
+command still produces an unpacked development preview without its runtime.
+Apple Silicon is the Mac package target; Intel support is not yet validated.
 
 Backend tests cover the desktop session credential, guarded shutdown, prevention
 of reconnect after shutdown acknowledgement and platform file-manager commands.
@@ -82,8 +87,8 @@ failed shutdown guard never signals the backend process.
 
 ## Required before a standalone release
 
-1. Build relocatable, versioned DimOS/Python/relay runtime distributions for Linux
-   x86-64 and macOS arm64. An existing development virtualenv cannot simply be
+1. Build a relocatable, versioned DimOS/Python/relay runtime distribution for Linux
+   x86-64. The macOS arm64 distribution is implemented in MAC.md. An existing development virtualenv cannot simply be
    copied into the application: interpreter links, entrypoint paths and native
    libraries must be validated after relocation.
 2. Test directly on Steam Deck: standard Gamepad exposure in Desktop and Gaming
@@ -113,8 +118,3 @@ no robot credentials and a fresh data folder. The interface loaded disconnected,
 WebTransport and Gamepad APIs were present, Node was unavailable in the renderer,
 and shutdown completed through the backend guard. This checks local application
 startup, not physical controller behavior, mapping throughput or Go2 movement.
-
-Unpacked Apple Silicon and Linux x86-64 previews were built successfully. The
-Linux artifact has not been run on SteamOS. The compact controller panel was
-inspected in Electron at 1280 x 800 using a simulated controller, with no
-horizontal page overflow. Real hardware input remains unverified.

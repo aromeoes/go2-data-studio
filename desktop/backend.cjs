@@ -1,6 +1,6 @@
 const { spawn, execFileSync } = require('node:child_process');
-const { randomBytes } = require('node:crypto');
-const { mkdirSync, createWriteStream, accessSync, constants } = require('node:fs');
+const { randomBytes, createHash } = require('node:crypto');
+const { mkdirSync, createWriteStream, accessSync, constants, existsSync, readFileSync, cpSync, renameSync, rmSync } = require('node:fs');
 const path = require('node:path');
 const net = require('node:net');
 
@@ -9,9 +9,53 @@ const DIMOS_SHA = 'c1c3cdc9d2ee54ca72259465688395699d7d99a2';
 function validateRuntime(runtime) {
   const python = path.join(runtime, '.venv', 'bin', 'python');
   accessSync(python, constants.X_OK);
+  const manifestPath = path.join(runtime, 'runtime.json');
+  if (existsSync(manifestPath)) {
+    const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'));
+    if (manifest.format !== 1 || manifest.dimos_sha !== DIMOS_SHA ||
+        manifest.platform !== process.platform || manifest.arch !== process.arch) {
+      throw new Error('The bundled DimOS runtime does not match this application or Mac.');
+    }
+    accessSync(path.join(runtime, 'bin', 'deno'), constants.X_OK);
+    return python;
+  }
   const sha = execFileSync('git', ['-C', runtime, 'rev-parse', 'HEAD'], { encoding: 'utf8', timeout: 5000 }).trim();
   if (sha !== DIMOS_SHA) throw new Error(`This build requires DimOS ${DIMOS_SHA}.`);
   return python;
+}
+
+function runtimeEnvironment(runtime, data, source, inherited = process.env) {
+  const env = { ...inherited };
+  delete env.PYTHONHOME;
+  const bundled = existsSync(path.join(runtime, 'runtime.json'));
+  const paths = [path.join(runtime, '.venv/bin'), path.join(runtime, 'bin')];
+  // Finder launches with a minimal PATH. Packaged builds use only their own
+  // executables and system tools. Development previews can still use Homebrew.
+  paths.push(...(bundled ? ['/usr/bin', '/bin', '/usr/sbin', '/sbin'] :
+    [env.PATH || '', '/opt/homebrew/bin', '/usr/local/bin']));
+  Object.assign(env, {
+    PATH: paths.join(path.delimiter), PYTHONPATH: source, PYTHONNOUSERSITE: '1',
+    PYTHONDONTWRITEBYTECODE: '1', PYTHONUNBUFFERED: '1',
+    DYLD_FALLBACK_LIBRARY_PATH: path.join(runtime, 'lib'),
+    DIMOS_RUNTIME: runtime, GO2_SPACES: data,
+    DIMOS_RUN_LOG_DIR: path.join(data, 'logs'), NUMBA_CACHE_DIR: path.join(data, 'numba-cache'),
+  });
+  if (bundled) {
+    // Deno writes compilation/cache metadata. Seed a private writable cache,
+    // keeping the installed application itself immutable.
+    const cacheId = createHash('sha256').update(readFileSync(path.join(runtime, 'runtime.json'))).digest('hex').slice(0, 16);
+    const denoCache = path.join(data, 'cache', 'deno-' + cacheId);
+    if (!existsSync(denoCache)) {
+      const staging = denoCache + '.' + randomBytes(8).toString('hex');
+      try {
+        cpSync(path.join(runtime, 'deno-cache'), staging, { recursive: true });
+        renameSync(staging, denoCache);
+      } finally { rmSync(staging, { recursive: true, force: true }); }
+    }
+    env.DENO_DIR = denoCache;
+    env.DENO_NO_UPDATE_CHECK = '1';
+  }
+  return env;
 }
 
 async function freePorts(count) {
@@ -48,11 +92,7 @@ class Backend {
       cwd: this.source,
       stdio: ['ignore', 'pipe', 'pipe'],
       env: {
-        ...process.env,
-        PYTHONPATH: this.source,
-        PYTHONUNBUFFERED: '1',
-        DIMOS_RUNTIME: this.runtime,
-        GO2_SPACES: this.data,
+        ...runtimeEnvironment(this.runtime, this.data, this.source),
         GO2_ENV_FILE: this.robotEnv,
         GO2_SETUP_PORT: String(port),
         GO2_RUNTIME_PORT: String(runtimePort),
@@ -110,4 +150,4 @@ class Backend {
     });
   }
 }
-module.exports = { Backend, DIMOS_SHA, freePorts, validateRuntime };
+module.exports = { Backend, DIMOS_SHA, freePorts, validateRuntime, runtimeEnvironment };

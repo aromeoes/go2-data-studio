@@ -23,7 +23,7 @@ async function runtimeSettings() {
   const configFile = path.join(home, 'desktop.json');
   let saved = {};
   if (existsSync(configFile)) saved = JSON.parse(readFileSync(configFile, 'utf8'));
-  let runtime = process.env.DIMOS_RUNTIME || saved.runtime;
+  let runtime = app.isPackaged ? path.join(process.resourcesPath, 'runtime') : process.env.DIMOS_RUNTIME || saved.runtime;
   if (!runtime) {
     const result = await dialog.showOpenDialog({
       title: 'Select your installed DimOS runtime (development preview)',
@@ -34,11 +34,13 @@ async function runtimeSettings() {
     runtime = result.filePaths[0];
   }
   validateRuntime(runtime);
-  writeFileSync(configFile, JSON.stringify({ runtime }), { mode: 0o600 });
+  // Do not persist a bundle path: Applications folders and app translocation can
+  // change it. Only development builds remember a selected external runtime.
+  if (!app.isPackaged) writeFileSync(configFile, JSON.stringify({ ...saved, runtime }), { mode: 0o600 });
   return {
     runtime,
-    data: process.env.GO2_SPACES || path.join(home, 'spaces'),
-    robotEnv: process.env.GO2_ENV_FILE || path.join(home, 'robot.env'),
+    data: process.env.GO2_SPACES || saved.data || path.join(home, 'spaces'),
+    robotEnv: process.env.GO2_ENV_FILE || saved.robotEnv || path.join(home, 'robot.env'),
     source: app.isPackaged ? path.join(process.resourcesPath, 'app') : path.resolve(__dirname, '..'),
     replayOnly: process.env.GO2_REPLAY_ONLY === '1',
   };
@@ -83,12 +85,18 @@ async function start() {
   };
   Menu.setApplicationMenu(Menu.buildFromTemplate([
     { label: 'Go2 Data Studio', submenu: [
+      { role: 'about' },
+      { type: 'separator' },
       { label: 'Open data folder', click: () => void shell.openPath(options.data) },
+      { label: 'Open logs folder', click: () => void shell.openPath(path.join(options.data, 'logs')) },
+      { type: 'separator' },
       { label: 'Quit', accelerator: 'CommandOrControl+Q', click: () => void requestQuit() },
     ] },
     { label: 'Edit', submenu: [{ role: 'undo' }, { role: 'redo' }, { role: 'cut' }, { role: 'copy' }, { role: 'paste' }, { role: 'selectAll' }] },
     { label: 'View', submenu: [{ role: 'togglefullscreen' }, { role: 'zoomIn' }, { role: 'zoomOut' }, { role: 'resetZoom' }] },
   ]));
+  app.setAboutPanelOptions({ applicationName: 'Go2 Data Studio', applicationVersion: app.getVersion(),
+    comments: 'Local Go2 mapping, recording and control. Powered by DimOS and the DimOS Web SDK.' });
   // Idle sleep is inhibited while this control application is open. Manual sleep
   // cannot be guaranteed safe: pause events complement robot-side watchdogs.
   blocker = powerSaveBlocker.start('prevent-app-suspension');
