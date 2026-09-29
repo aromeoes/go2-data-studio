@@ -3,6 +3,7 @@ export type Motion = { vx: number; vy: number; wz: number };
 export type DriveKind = "go2" | "vector";
 export const ZERO: Motion = { vx: 0, vy: 0, wz: 0 };
 export const INPUT_TIMEOUT_MS = 200;
+export const GO2_BOOST_SPEED = 1.0;
 
 export function axis(value: number, deadzone = 0.18, exponent = 1.5) {
   if (!Number.isFinite(value)) throw Error("Invalid controller axis");
@@ -48,9 +49,13 @@ export class GamepadGate {
       const steering = lateral !== 0 ? lateral : turn;
       return { vx: forward * speed || 0, vy: 0, wz: steering * 1.5 || 0 };
     }
+    // Standard Gamepad button 6 is L2. Boost only forward translation;
+    // the stick remains proportional and the L1 lease still owns movement.
+    const boost = pad.buttons[6]?.pressed === true;
+    const forwardSpeed = boost && forward > 0 ? GO2_BOOST_SPEED : speed;
     const length = Math.max(1, Math.hypot(forward, lateral));
     return {
-      vx: (forward / length) * speed,
+      vx: (forward / length) * forwardSpeed,
       vy: (lateral / length) * Math.min(speed, 0.2),
       wz: turn * 0.5,
     };

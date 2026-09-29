@@ -1,7 +1,7 @@
 import { useEffect, useRef } from "react";
 
 export function focusNext(direction: number) {
-  const modal = document.querySelector('[role="dialog"], dialog[open]');
+  const modal = document.querySelector('[role="dialog"], [role="alertdialog"], dialog[open]');
   const scope = modal || document;
   const controls = Array.from(
     scope.querySelectorAll<HTMLElement>(

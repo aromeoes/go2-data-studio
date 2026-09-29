@@ -186,3 +186,19 @@ it("renames the selected space without changing its identity", async () => {
   );
   expect(host.querySelector("h1")?.textContent).toContain("Upstairs");
 });
+
+it("pauses control before generating a map from a backed-up recording", async () => {
+  await act(async () => {
+    stub.state.mode = "agent";
+    stub.state.segments[0].backup = {status:"complete"};
+    stub.change();
+  });
+  const request = vi.spyOn(globalThis,"fetch").mockImplementation(async (path) => {
+    if (path === "/api/maps") expect(stub.state.mode).toBe("idle");
+    return {ok:true,json:async()=>({id:"map1"})} as Response;
+  });
+  expect(button("Pause & generate map").disabled).toBe(false);
+  await act(async()=>button("Pause & generate map").click());
+  expect(stub.command).toHaveBeenCalledWith("/mode", {mode:"idle"});
+  expect(request).toHaveBeenCalledWith("/api/maps", expect.objectContaining({body:expect.stringContaining('"segment_id":"segment1"')}));
+});

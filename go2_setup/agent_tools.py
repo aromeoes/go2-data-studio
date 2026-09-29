@@ -29,7 +29,33 @@ class Generate(Empty):
     optimize: bool = True
 
 
+class Place(Empty):
+    location_name: str = Field(min_length=1, max_length=80, pattern=r".*\S.*")
+
+
+class Query(Empty):
+    query: str = Field(min_length=1, max_length=200, pattern=r".*\S.*")
+
+
+class Say(Empty):
+    text: str = Field(min_length=1, max_length=300, pattern=r".*\S.*")
+
+
+ROBOT_SKILLS = {
+    "tag_location", "list_locations", "navigate_with_text", "start_patrol", "stop_patrol",
+    "follow_person", "stop_following", "speak",
+}
+MOTION_SKILLS = {"navigate_with_text", "start_patrol", "follow_person"}
+
 TOOLS = [
+    ("tag_location", Place, "Save a name for the current position in the selected space. Uses DimOS spatial navigation. Names persist, but coordinates cannot be reused after reconnect until relocalization is integrated.", "Remember this as Tule's desk."),
+    ("list_locations", Empty, "List named places in the selected space and whether they are usable in the current connection.", "Which places have I tagged?"),
+    ("navigate_with_text", Query, "Use DimOS navigation to go to an exact saved place name in this connection. Use list_locations first. Visual object navigation and old-map relocalization are not enabled. Acceptance does not mean arrival.", "Go to Tule's desk."),
+    ("start_patrol", Empty, "Start DimOS coverage patrol in the live known map. Continuously selects reachable patrol goals until stopped. This is not a custom waypoint route. Use robot_status for progress and errors.", "Start patrolling this area."),
+    ("stop_patrol", Empty, "Stop patrol and other navigation while retaining HumanCLI control.", "Stop patrol."),
+    ("follow_person", Query, "Use the camera to select one described person, then follow with DimOS visual servoing and a CPU tracker. Requires OpenAI vision and a clear mapped corridor. Can lose or confuse the target; use supervised open-space demos. Returns before detection completes. Stop existing navigation first.", "Follow the person wearing a blue shirt."),
+    ("stop_following", Empty, "Stop person following and navigation while retaining HumanCLI control.", "Stop following."),
+    ("speak", Say, "Send a short spoken message to the Go2 speaker using DimOS TTS and its Go2 audio bridge. Requires the OpenAI key and compatible robot audio hardware. Only speak when requested. Use robot_status to check delivery status; audibility is not confirmed.", "Say: welcome to the office."),
     (
         "robot_status",
         Empty,
@@ -89,6 +115,7 @@ TOOLS = [
 
 TOOL_CAPABILITIES = {
     "move_relative": "navigation",
+    **{name: "navigation" for name in ("tag_location", "list_locations", "navigate_with_text", "start_patrol", "stop_patrol", "follow_person", "stop_following")},
     "start_exploration": "exploration",
     "camera_view": "camera",
     "start_recording": "recording",
@@ -111,6 +138,7 @@ def tool_enabled(name, config=None):
     return config is None or (
         enabled(config, "humancli")
         and (name not in TOOL_CAPABILITIES or enabled(config, TOOL_CAPABILITIES[name]))
+        and (name != "follow_person" or enabled(config, "camera"))
     )
 
 
@@ -118,7 +146,7 @@ def capabilities(vision=True, config=None):
     return [
         {"name": name, "example": example, "detail": description}
         for name, _, description, example in tools_for(config)
-        if (vision or name != "camera_view") and tool_enabled(name, config)
+        if (vision or name not in {"camera_view", "follow_person"}) and tool_enabled(name, config)
     ]
 
 
@@ -126,7 +154,7 @@ def definitions(vision, config=None):
     return [
         {"name": name, "description": description, "inputSchema": schema.model_json_schema()}
         for name, schema, description, _ in tools_for(config)
-        if (vision or name != "camera_view") and tool_enabled(name, config)
+        if (vision or name not in {"camera_view", "follow_person"}) and tool_enabled(name, config)
     ]
 
 
@@ -157,11 +185,31 @@ def execute(owner, turn, name, arguments):
                 "mode": s.mode,
                 "battery": s.telemetry.get("battery"),
                 "navigation": s.telemetry.get("navigation"),
+                "skills": s.telemetry.get("skills"),
                 "sensors": s.telemetry.get("sensors"),
                 "recording": bool(s.session),
                 "vector": s.telemetry.get("vector"),
                 "control": s.telemetry.get("control"),
             }
+        elif name in ROBOT_SKILLS:
+            if name in MOTION_SKILLS:
+                if turn["moved"]:
+                    raise ValueError("Only one movement request per message")
+                turn["moved"] = True
+            if name == "follow_person" and not owner.config.resolve()["vision"]:
+                raise ValueError("Enable vision before following a person")
+            if name in {"tag_location", "list_locations", "navigate_with_text"}:
+                if not turn["space_id"]:
+                    raise ValueError("Select a space first")
+                s.catalog.get(turn["space_id"], "space")
+            result = s.call("/skills/call", {"name": name, "arguments": args.model_dump(),
+                            "epoch": turn["epoch"], "space_id": turn["space_id"]}, timeout=12)
+            if not result.get("ok"):
+                raise ValueError("Skill request was refused")
+            if name in {"stop_patrol", "stop_following"}:
+                turn["paused"] = True
+            elif name in MOTION_SKILLS:
+                turn["paused"] = False
         elif name == "move_relative":
             if turn["moved"]:
                 raise ValueError(

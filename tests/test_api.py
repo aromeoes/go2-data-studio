@@ -118,6 +118,17 @@ def test_cloud_routes_keep_credentials_private_and_require_local_header(tmp_path
         cloud.begin_login.assert_called_once()
         assert client.post("/api/cloud/uploads/test", headers=HEADERS).json()["percent"] == 0
         cloud.start.assert_called_once_with("test")
+        assert (
+            client.post(
+                "/api/cloud/uploads/test", headers=HEADERS, json={"name": "Office"}
+            ).status_code
+            == 200
+        )
+        cloud.start.assert_called_with("test", name="Office")
+        assert (
+            client.post("/api/cloud/uploads/test", headers=HEADERS, json={"name": ""}).status_code
+            == 422
+        )
         state = client.get("/api/state").json()
         assert "api_key" not in state["cloud"]
         assert "device_code" not in state["cloud"]

@@ -316,6 +316,15 @@ class ControlGate(Module):
             return True
 
     @rpc
+    def skill_velocity(self, epoch: int, x: float, y: float, yaw: float) -> bool:
+        with self.authority.lock:
+            if not self.authority.valid(epoch, {"agent"}) or not self.navigation_enabled:
+                return False
+            before = self.nav_forwarded
+            self._nav(Twist((x, y, 0), (0, 0, yaw)))
+            return self.nav_forwarded > before
+
+    @rpc
     def switch(self, mode: str) -> int:
         with self.authority.lock:
             capability = {"teleop": "teleop", "explore": "exploration", "agent": "humancli"}.get(

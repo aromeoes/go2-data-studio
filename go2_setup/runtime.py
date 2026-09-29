@@ -21,6 +21,7 @@ from dimos.porcelain.dimos import Dimos
 from go2_setup.modules import ConsoleBridge, ConsoleExplorer, ControlGate, PassiveGo2Connection
 from go2_setup.process_guard import start_parent_guard
 from go2_setup.posture import perform_posture
+from go2_setup.unitree_actions import execute as execute_unitree_action
 from go2_setup.navigation_status import NavigationStatus
 from go2_setup.config import Settings
 from go2_setup.sdk_bridge import ConsoleSDK, sdk_blueprint
@@ -106,11 +107,17 @@ def main():
         dimos.get_module("ConsoleExplorer") if enabled(session_profile, "exploration") else None
     )
     connection = dimos.get_module("PassiveGo2Connection")
+    skills = None
+    if enabled(session_profile, "humancli"):
+        from go2_setup.robot_skills import RobotSkills
+        skills = RobotSkills(Settings().root, gate, planner, bridge, connection, replay=bool(args.replay))
     lock = threading.RLock()
     token = os.environ["GO2_RUNTIME_TOKEN"]
 
     def halt(latch=False):
         epoch = gate.halt(latch)
+        if skills:
+            skills.stop()
         if explorer:
             explorer.stop_exploration()
         if planner:
@@ -146,6 +153,7 @@ def main():
                             "replay": bool(args.replay),
                         }
                         result["navigation"] = navigation_status.snapshot(result)
+                        result["skills"] = skills.state() if skills else None
                     elif self.path == "/mode":
                         capability = {
                             "teleop": "teleop",
@@ -182,6 +190,8 @@ def main():
                         # velocity gate before cancelling either producer.
                         if not gate.navigation(data["epoch"], False):
                             raise ValueError("The instruction lost control of the robot")
+                        if skills:
+                            skills.stop()
                         if explorer:
                             explorer.stop_exploration()
                         if planner:
@@ -206,6 +216,25 @@ def main():
                                         )
                                     )
                                 }
+                    elif self.path == "/skills/call":
+                        require(session_profile, "humancli")
+                        name = data["name"]
+                        from go2_setup.agent_tools import TOOLS, ROBOT_SKILLS
+                        if name not in ROBOT_SKILLS:
+                            raise ValueError("Unknown skill")
+                        schemas = {name: schema for name, schema, _, _ in TOOLS}
+                        arguments = schemas[name].model_validate(data.get("arguments", {})).model_dump()
+                        if name not in {"speak"}:
+                            require(session_profile, "navigation")
+                        if name == "follow_person":
+                            require(session_profile, "camera")
+                        result = skills.call(name, arguments, data["epoch"], data.get("space_id"))
+                    elif self.path == "/unitree/action":
+                        require(session_profile, "teleop")
+                        result = execute_unitree_action(
+                            connection, data["name"], control=gate.state(), epoch=data["epoch"],
+                            confirmed=data["confirmed"], replay=bool(args.replay),
+                        )
                     elif self.path == "/record/start":
                         result = bridge.begin_recording(data["path"])
                     elif self.path == "/record/stop":
@@ -237,6 +266,8 @@ def main():
         try:
             halt()
             bridge.end_recording()
+            if skills:
+                skills.close()
         finally:
             server.server_close()
             dimos.stop()

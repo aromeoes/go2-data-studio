@@ -84,7 +84,7 @@ Recordings use the official DimOS SqliteStore. The application currently owns th
 
 ## Cloud backups
 
-Choose **Connect DimOS Cloud**, complete sign-in, then **Upload dataset** on a segment. The application snapshots the SQLite database, uploads through the official Cloud API, and downloads the stored object as a stream to verify its SHA-256 before marking it **Backed up**. Verification adds download traffic. Preparing the snapshot needs approximately one extra recording-size of disk space plus 1 GB headroom.
+Choose **Connect DimOS Cloud**, complete sign-in, then **Upload dataset** on a segment. Edit the suggested dataset name and choose **Start upload**. Each segment has its own name, saved in the cloud filename and dataset metadata and shown beside progress and the backup badge. Resuming an existing upload retains its name; local recording paths remain unchanged. If Cloud deduplicates against an existing backup, the confirmed cloud filename is shown. The application snapshots the SQLite database, uploads through the official Cloud API, and downloads the stored object as a stream to verify its SHA-256 before marking it **Backed up**. Verification adds download traffic. Preparing the snapshot needs approximately one extra recording-size of disk space plus 1 GB headroom.
 
 Uploads contain uncompressed recording databases, not generated maps. Local originals remain in place. Completed parts can be resumed, and backup badges are reconciled with the remote account and local data. The current HTTP client is custom; migrating to the official CloudData Python client is tracked in [follow-up work](docs/CHECKPOINT.md).
 

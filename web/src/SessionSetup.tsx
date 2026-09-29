@@ -10,6 +10,7 @@ import {
   X,
 } from "lucide-react";
 import type { State } from "./types";
+import { ConnectionProgress } from "./ConnectionProgress";
 
 export type SessionProfile = {
   preset: string;
@@ -210,6 +211,7 @@ export function SessionSetup({
           {error}
         </p>
       )}
+      <ConnectionProgress connection={state.connection} kind={kind} replay={state.replay} />
       {!offline && !expanded && (
         <div className="session-summary">
           <span>
@@ -568,7 +570,7 @@ export function SessionSetup({
                     await apply();
                   })}
                 >
-                  {preview ? "Start session" : "Apply changes"}
+                  {state.connection !== "online" ? "Waiting for connection…" : busy ? "Starting session…" : preview ? "Start session" : "Apply changes"}
                   <ChevronRight size={15} />
                 </button>
               </div>

@@ -37,6 +37,7 @@ browser has not exposed the controller yet. Touch and trackpad remain available.
 | Left stick, while armed | Forward/backward and sideways translation |
 | Right stick horizontal, while armed | Turn |
 | L1 / LB held | Take Teleop control from any mode; release stops and relinquishes the app lease |
+| L2 / LT held with L1 | Forward boost up to 1.0 m/s at full stick; release L2 restores the selected speed |
 | B | Request software stop |
 
 With controller input selected, center the sticks and hold L1 to take Teleop
@@ -117,3 +118,69 @@ manual. The existing Mac installation is independent of this Linux build.
 
 No physical robot connection or motion was requested. Long recording performance,
 thermals, battery consumption and physical controls need a supervised check.
+
+## Unitree actions and map generation
+
+Expand **Unitree actions** under Go2 controls to search the installed DimOS
+`UnitreeSkillContainer` registry. Every registry entry is listed. The 30 name-only
+commands can be submitted after pausing control and confirming the exact action.
+The 10 parameterized entries remain visible with an explanation because the pinned
+upstream dispatcher accepts only an action name. Actual support depends on firmware;
+the UI reports rejection or missing acknowledgement, never inferred completion.
+These actions are operator controls, not additional HumanCLI tools. They use the
+same Web SDK command channel and do not run automatically on connection or restart.
+
+A saved recording's **Generate map** action becomes **Pause & generate map** when
+Teleop, HumanCLI or exploration is active. This explicitly pauses control first.
+Recording and pending-action restrictions now include a visible explanation.
+Cloud backup status is independent: map generation runs locally from the saved DB.
+
+
+## HumanCLI skills and patrol demo
+
+Full mode agent exposes DimOS tagging, named navigation, coverage patrol, person
+following, and speech, in addition to recording and exploration. HumanCLI's info
+button lists the enabled tools. Its skill status panel reports asynchronous
+progress and failures.
+
+To demonstrate patrol:
+
+1. Connect Go2, start Full mode agent, and select your space.
+2. Use Teleop to map a connected open area with several meters of clear floor.
+3. Switch to HumanCLI. Say `Start patrolling this area`.
+4. Watch the live destination and skill status. DimOS chooses coverage goals in
+   the known area. Keep the control page active so its lease stays valid.
+5. Say `Stop patrol`, switch to Teleop, or use Emergency stop.
+
+To demonstrate names, say `Remember this as reception`, Teleop to a second clear
+location, switch back to HumanCLI, and say `Go to reception`. Names persist on disk
+in `named-places.sqlite`, scoped to a space and runtime frame. After reconnect,
+old names are listed but cannot be used for movement until tagged again. Saved-map
+relocalization and semantic object navigation are not integrated yet. A generated
+or uploaded map does not automatically align a new connection's coordinates.
+
+Person following reuses DimOS `PersonFollowSkillContainer` and `VisualServoing2D`,
+with OpenCV CSRT replacing EdgeTAM because the Deck cannot run the upstream
+CUDA/MPS-only tracker. Initial person selection uses DimOS OpenAI vision with the
+existing HumanCLI key and vision setting. No GPU weights are downloaded. Only
+one described person should be in view for a supervised demo. Tracking can lose
+or switch targets; the app does not identify a person by name. Velocities go
+through the existing control gate plus a short swept footprint check against
+fresh camera, odometry, LiDAR and known free map cells. This is not certified
+obstacle avoidance or an unattended following feature.
+
+`Say welcome to the office` uses DimOS OpenAI TTS and `Go2AudioBridgeModule` on
+the existing connection to the Go2 speaker. It needs an OpenAI key and compatible
+Go2 audio hardware/firmware. The status confirms acknowledged audio upload, not
+that anyone heard it. Push-to-talk still records the Deck/Mac microphone; the
+Go2 microphone is not connected to HumanCLI.
+
+The app hosts lifecycle adapters around the pinned DimOS skill methods, using its
+existing planner and sensor bridge. It does not create another robot connection.
+Mode changes, stop, lease loss and reconnect cancel skills. Delayed vision or
+speech responses cannot restart movement. Coverage patrol keeps live replanning
+enabled and reports a 90-second destination timeout rather than waiting forever.
+
+Lateral Teleop currently has a 0.2 m/s cap in both the joystick mapping and backend.
+The 18% dead zone and 1.5 input exponent mean half-stick requests about 0.05 m/s.
+L2 boosts forward movement only. These limits are unchanged by the skill update.

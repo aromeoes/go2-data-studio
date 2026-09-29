@@ -6,7 +6,7 @@ from unittest.mock import Mock
 import pytest
 
 from go2_setup.catalog import Catalog, atomic_json
-from go2_setup.cloud import CloudBackups, CloudError, fingerprint
+from go2_setup.cloud import CloudBackups, CloudError, dataset_name, fingerprint
 from go2_setup.config import Settings
 
 
@@ -300,3 +300,61 @@ def test_unverified_remote_bytes_never_reach_complete(setup):
     cloud._verify_download.side_effect = None
     assert run(cloud, segment)["status"] == "complete"
     assert remote.sent == [1, 2, 3]
+
+
+def test_named_upload_keeps_name_on_resume_and_preserves_local_file(setup):
+    cloud, catalog, segment = setup
+    remote = Remote(cloud)
+    cloud.request, cloud._put = remote.request, remote.put
+    remote.fail_part = 2
+    before = fingerprint(segment["path"])
+    cloud.start(segment["id"], name="  Office west wing  ")
+    cloud.worker.join(10)
+    assert not cloud.worker.is_alive()
+    assert remote.upload["filename"] == "Office west wing.db"
+    assert remote.upload["manifest"]["dataset_name"] == "Office west wing"
+    assert catalog.get(segment["id"])["backup"]["name"] == "Office west wing"
+    with pytest.raises(CloudError, match="existing name"):
+        cloud.start(segment["id"], name="Different name")
+    remote.fail_part = None
+    backup = run(cloud, segment)
+    assert backup["status"] == "complete"
+    assert backup["name"] == "Office west wing"
+    assert remote.upload["filename"] == "Office west wing.db"
+    assert fingerprint(segment["path"]) == before
+
+
+@pytest.mark.parametrize(
+    "name", ["", "  ", "../office", "room\\file", "a" * 121, "x\nroom", "..", "🌏" * 60]
+)
+def test_invalid_dataset_names(name):
+    with pytest.raises(CloudError):
+        dataset_name(name)
+
+
+def test_legacy_upload_resumes_with_original_filename(setup):
+    cloud, catalog, segment = setup
+    catalog.update(segment["id"], backup={"status": "paused", "upload_id": "upload"})
+    remote = Remote(cloud)
+    cloud.request, cloud._put = remote.request, remote.put
+    assert run(cloud, segment)["status"] == "complete"
+    assert remote.upload["filename"] == f"go2-{segment['id']}.db"
+
+
+def test_deduplicated_upload_displays_actual_cloud_name(setup):
+    cloud, catalog, segment = setup
+    remote = Remote(cloud)
+
+    def request(method, path, **kwargs):
+        result = remote.request(method, path, **kwargs)
+        if path.endswith("/download"):
+            result["filename"] = "Previously backed up.db"
+        return result
+
+    cloud.request, cloud._put = request, remote.put
+    cloud.start(segment["id"], name="New label")
+    cloud.worker.join(10)
+    backup = catalog.get(segment["id"])["backup"]
+    assert backup["status"] == "complete"
+    assert backup["name"] == "Previously backed up"
+    assert backup["filename"] == "Previously backed up.db"

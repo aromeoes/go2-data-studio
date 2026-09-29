@@ -53,6 +53,16 @@ class ProfileBody(BaseModel):
     enabled: list[str]
 
 
+class UnitreeActionBody(BaseModel):
+    name: str = Field(min_length=1, max_length=50)
+    confirmed: str = Field(min_length=1, max_length=50)
+    epoch: int
+
+
+class UploadBody(BaseModel):
+    name: str = Field(min_length=1, max_length=120)
+
+
 class NameBody(BaseModel):
     name: str = Field(min_length=1, max_length=80)
 
@@ -284,6 +294,8 @@ def create_app(settings: Settings | None = None):
             return clear()
         if path in {"/posture/stand", "/posture/lie"}:
             return posture(path.rsplit("/", 1)[1])
+        if path == "/unitree/action":
+            return unitree_action(UnitreeActionBody(**body))
         if path == "/vector/personality":
             if supervisor.robot_kind != "vector":
                 raise ValueError("Connect Vector first")
@@ -302,8 +314,8 @@ def create_app(settings: Settings | None = None):
         return cloud.refresh()
 
     @app.post("/api/cloud/uploads/{segment_id}")
-    def cloud_upload(segment_id: str):
-        return cloud.start(segment_id)
+    def cloud_upload(segment_id: str, body: UploadBody | None = None):
+        return cloud.start(segment_id, name=body.name) if body else cloud.start(segment_id)
 
     @app.post("/api/cloud/uploads/{segment_id}/pause")
     def cloud_pause(segment_id: str):
@@ -436,6 +448,23 @@ def create_app(settings: Settings | None = None):
     @app.post("/api/clear")
     def clear():
         return supervisor.call("/clear")
+
+    @app.get("/api/unitree/actions")
+    def unitree_actions():
+        from go2_setup.unitree_actions import catalog
+        return {"source": "DimOS UnitreeSkillContainer", "actions": catalog()}
+
+    @app.post("/api/unitree/action")
+    def unitree_action(body: UnitreeActionBody):
+        with supervisor.lock:
+            if supervisor.robot_kind != "go2" or supervisor.connection != "online":
+                raise ValueError("Connect Go2 before running Unitree actions")
+            require(supervisor.profile, "teleop")
+            if supervisor.mode != "idle":
+                raise ValueError("Pause movement before running a Unitree action")
+            result = supervisor.call("/unitree/action", body.model_dump(), timeout=12)
+            catalog.event("unitree", f"Action {body.name} acknowledged by Go2")
+            return result
 
     @app.post("/api/posture/{action}")
     def posture(action: str):

@@ -45,7 +45,10 @@ import { SessionSetup } from "./SessionSetup";
 const available = (state: State | null, capability: string) =>
   !state?.profile || state.profile.enabled.includes(capability);
 import { HumanCLISettings } from "./HumanCLISettings";
+import { RobotSkillStatus } from "./RobotSkillStatus";
 import { HumanCLIHelp } from "./HumanCLIHelp";
+import { UnitreeActions } from "./UnitreeActions";
+import { GenerateMapButton } from "./GenerateMapButton";
 import { ControllerDiagram } from "./ControllerDiagram";
 import { TeleopPad } from "./TeleopPad";
 import { CloudPanel, BackupControl } from "./Cloud";
@@ -91,6 +94,7 @@ async function api(path: string, data: unknown = {}) {
       "/clear",
       "/agent",
       "/vector/personality",
+      "/unitree/action",
       "/posture/stand",
       "/posture/lie",
     ].includes(path)
@@ -283,7 +287,8 @@ export function App() {
       !pending &&
       !modal &&
       !disconnectDialog &&
-      !voice.active,
+      !voice.active &&
+      !document.querySelector('[aria-modal="true"], dialog[open]'),
     speed: () => teleopSpeed,
     kind: () => stateRef.current?.robot_kind || "go2",
     input: (value) => robot.gamepad(value),
@@ -980,7 +985,8 @@ export function App() {
                     <>
                       <ControllerDiagram />
                       <p className="setup-footnote">
-                        Hold L1 to take Teleop control · Release to stop
+                        Hold L1 to drive · Release to stop
+                        {state.robot_kind !== "vector" && " · Hold L2 for 1.0 m/s forward boost"}
                       </p>
                     </>
                   )}
@@ -1144,6 +1150,7 @@ export function App() {
                         }
                       }}
                     />
+                    {state.robot_kind !== "vector" && <RobotSkillStatus state={state.telemetry.skills} />}
                     {state.agent.busy && (
                       <div className="agent-progress" role="status">
                         <span>HumanCLI is working…</span>
@@ -1366,6 +1373,7 @@ export function App() {
                     </button>
                   </div>
                 )}
+                {state.robot_kind !== "vector" && <UnitreeActions connected={connected} mode={state.mode} stopped={!!state.telemetry.control?.estop} epoch={state.epoch} enabled={available(state, "teleop")} api={api} />}
               </section>
             </aside>
           </div>
@@ -1556,6 +1564,7 @@ export function App() {
                         <td>
                           <BackupControl
                             segment={s}
+                            spaceName={space?.name}
                             cloud={state.cloud}
                             action={action}
                             api={api}
@@ -1593,26 +1602,14 @@ export function App() {
                               <Play size={13} />
                               Replay
                             </button>
-                            <button
-                              disabled={
-                                s.status === "recording" ||
-                                !!pending ||
-                                state.mode !== "idle"
+                            <GenerateMapButton recording={s.status === "recording"} pending={!!pending} mode={state.mode} onGenerate={() => void action("map", async () => {
+                              if (state.mode !== "idle") {
+                                robot.disarm(); setArmed(false); keys.current.clear(); setPressed([]); heldEpoch.current = null;
+                                await api("/mode", {mode: "idle"});
                               }
-                              onClick={() =>
-                                action("map", async () => {
-                                  await api("/maps", {
-                                    segment_id: s.id,
-                                    voxel: resolution,
-                                    pgo,
-                                  });
-                                  setTab("maps");
-                                })
-                              }
-                            >
-                              Generate map
-                              <ArrowUpRight size={14} />
-                            </button>
+                              await api("/maps", {segment_id: s.id, voxel: resolution, pgo});
+                              setTab("maps");
+                            })} />
                             {s.backup?.status !== "complete" && (
                               <button
                                 aria-label={`Delete segment ${s.id.slice(0, 6)}`}

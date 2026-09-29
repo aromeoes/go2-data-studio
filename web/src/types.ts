@@ -1,4 +1,6 @@
 export type Backup = {
+  name?: string;
+  filename?: string;
   status: string;
   percent?: number;
   uploaded_bytes?: number;
@@ -81,6 +83,7 @@ export type State = {
   maps: Item[];
   events: { id: number; ts: number; message: string }[];
   telemetry: {
+    skills?: import("./RobotSkillStatus").RobotSkillState | null;
     vector?: import("./VectorSensors").VectorReadings;
     battery?: { percent: number | null; received: number | null };
     navigation?: NavigationInfo;

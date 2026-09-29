@@ -2452,3 +2452,45 @@ button.robot-select:hover:not(:disabled) {
 
 .workspace.vector-workspace { grid-template-columns: minmax(0, 1fr) minmax(360px, 1fr); }
 @media (max-width: 900px) { .workspace.vector-workspace { grid-template-columns: 1fr; } }
+
+.dataset-name {
+  font-size: 12px;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+dialog.upload-dialog {
+  position: fixed;
+  inset: 0;
+  margin: auto;
+  max-width: min(460px, calc(100vw - 32px));
+  color: var(--text);
+  border: 1px solid #34463d;
+}
+dialog.upload-dialog::backdrop {
+  background: #0009;
+}
+
+.connection-progress { display: flex; align-items: flex-start; gap: 10px; padding: 12px; margin: 12px 0; border: 1px solid #405448; border-radius: 8px; background: #1d2921; }
+.connection-progress strong { font-size: 13px; }
+.connection-progress p { color: #b0c1b4; font-size: 12px; line-height: 1.5; margin: 6px 0 0; }
+.connection-elapsed { margin-left: 12px; font-size: 12px; font-variant-numeric: tabular-nums; color: #b0c1b4; }
+.connection-spinner { flex: none; animation: connection-spin 1.2s linear infinite; }
+@keyframes connection-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .connection-spinner { animation: none; } }
+
+.unitree-actions { margin-top: 16px; border-top: 1px solid #34463d; padding-top: 12px; }
+.unitree-actions summary { cursor: pointer; font-weight: 600; font-size: 13px; }
+.unitree-actions p, .generate-map-action small { font-size: 12px; line-height: 1.5; color: #b0c1b4; }
+.unitree-actions label { display: block; font-size: 12px; margin: 10px 0; }
+.unitree-actions input, .unitree-actions select { width: 100%; margin-top: 6px; }
+.unitree-actions select { padding: 6px; }
+.unitree-actions option { padding: 6px; }
+.generate-map-action small { display: block; max-width: 180px; }
+
+.robot-skill-status { border: 1px solid var(--line, #30343c); border-radius: 8px; padding: 10px; font-size: 13px; }
+.robot-skill-status [role="status"] { display: grid; gap: 4px; }
+.robot-skill-status strong { text-transform: capitalize; }
+.robot-skill-status details { margin-top: 8px; }
+.robot-skill-status summary { cursor: pointer; }
+.robot-skill-status ul, .robot-skill-status ol { padding-left: 20px; }
+.robot-skill-status li { margin: 6px 0; }

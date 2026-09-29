@@ -130,7 +130,7 @@ async function requestQuit() {
     await dialog.showMessageBox(window, {
       type: 'warning', title: 'Finish the robot session first',
       message: error.message,
-      detail: 'Use the dashboard to save recording, lie the robot down with an operator present, visually confirm support and disconnect. Quitting also cancels map jobs and pauses uploads.',
+      detail: 'Use the dashboard to stop movement, save the recording and disconnect. Quitting also cancels map jobs and pauses uploads.',
       buttons: ['Return to dashboard'],
     });
     window?.show();

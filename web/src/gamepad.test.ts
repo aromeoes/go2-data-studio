@@ -99,3 +99,30 @@ describe("controller authority and analog input", () => {
     }
   });
 });
+
+it("boosts Go2 forward motion with L2 and restores selected speed on release", () => {
+  const gate = new GamepadGate();
+  gate.sample(pad(), 0.5);
+  const forward = pad([0, -1, 0], true);
+  (forward as any).buttons = [...forward.buttons, { pressed: false, value: 0 }, { pressed: true, value: 1 }] as GamepadButton[];
+  expect(gate.sample(forward, 0.5)?.vx).toBe(1);
+  (forward as any).axes[1] = -0.59;
+  expect(gate.sample(forward, 0.5)?.vx).toBeCloseTo(0.5 ** 1.5);
+  (forward as any).axes[1] = -1;
+  (forward.buttons[6] as any).pressed = false;
+  expect(gate.sample(forward, 0.5)?.vx).toBe(0.5);
+});
+
+it("L2 cannot arm driving, accelerate reverse or turn, or boost Vector", () => {
+  const gate = new GamepadGate();
+  const held = pad([0, -1, 0], true);
+  (held as any).buttons = [...held.buttons, { pressed: false, value: 0 }, { pressed: true, value: 1 }] as GamepadButton[];
+  expect(gate.sample(held, 0.5)).toEqual(ZERO);
+  gate.sample(pad(), 0.5);
+  (held as any).axes = [0, 1, -1];
+  expect(gate.sample(held, 0.5)).toEqual({ vx: -0.5, vy: -0, wz: 0.5 });
+  (held as any).axes = [0, -1, 0];
+  expect(gate.sample(held, 0.1, "vector")?.vx).toBe(0.1);
+  (held.buttons[4] as any).pressed = false;
+  expect(gate.sample(held, 0.5)).toEqual(ZERO);
+});
