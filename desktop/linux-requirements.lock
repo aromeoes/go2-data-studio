@@ -307,3 +307,7 @@ yarl==1.25.1
 yourdfpy==0.0.60
 zipp==4.1.0
 zstandard==0.25.0
+
+# Vector embodiment, additive to the validated Go2 runtime
+aiogrpc==1.8
+wirepod-vector-sdk==0.8.1

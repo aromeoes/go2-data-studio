@@ -24,6 +24,30 @@ from go2_setup.posture import perform_posture
 from go2_setup.navigation_status import NavigationStatus
 from go2_setup.config import Settings
 from go2_setup.sdk_bridge import ConsoleSDK, sdk_blueprint
+from go2_setup.profiles import from_env, enabled, require
+
+
+def build_blueprint(session_profile, ip="", replay=None, config=None):
+    config = config or {}
+    modules = [
+        PassiveGo2Connection.blueprint(ip="replay" if replay else ip, velocity_api=True),
+        ControlGate.blueprint(),
+        ConsoleBridge.blueprint(),
+        ConsoleSDK.blueprint(),
+        sdk_blueprint(),
+    ]
+    if enabled(session_profile, "mapping"):
+        modules += [
+            VoxelGridMapper.blueprint(
+                device="CPU:0", voxel_size=0.1, emit_every=8, block_count=250000
+            ),
+            CostMapper.blueprint(),
+        ]
+    if enabled(session_profile, "navigation"):
+        modules.append(ReplanningAStarPlanner.blueprint())
+    if enabled(session_profile, "exploration"):
+        modules.append(ConsoleExplorer.blueprint())
+    return autoconnect(*modules).global_config(**config)
 
 
 def main():
@@ -67,32 +91,30 @@ def main():
         config.update(replay=True, replay_db=args.replay)
     else:
         config.update(replay=False)
-    blueprint = autoconnect(
-        # The planner and the UI emit m/s and rad/s, not normalized joystick axes.
-        PassiveGo2Connection.blueprint(ip="replay" if args.replay else args.ip, velocity_api=True),
-        VoxelGridMapper.blueprint(device="CPU:0", voxel_size=0.1, emit_every=8, block_count=250000),
-        CostMapper.blueprint(),
-        ReplanningAStarPlanner.blueprint(),
-        ConsoleExplorer.blueprint(),
-        ControlGate.blueprint(),
-        ConsoleBridge.blueprint(),
-        ConsoleSDK.blueprint(),
-        sdk_blueprint(),
-    ).global_config(**config)
+    session_profile = from_env()
+    blueprint = build_blueprint(session_profile, args.ip, args.replay, config)
     dimos = Dimos()
     dimos.run(blueprint)
     gate = dimos.get_module("ControlGate")
     bridge = dimos.get_module("ConsoleBridge")
-    planner = dimos.get_module("ReplanningAStarPlanner")
-    explorer = dimos.get_module("ConsoleExplorer")
+    planner = (
+        dimos.get_module("ReplanningAStarPlanner")
+        if enabled(session_profile, "navigation")
+        else None
+    )
+    explorer = (
+        dimos.get_module("ConsoleExplorer") if enabled(session_profile, "exploration") else None
+    )
     connection = dimos.get_module("PassiveGo2Connection")
     lock = threading.RLock()
     token = os.environ["GO2_RUNTIME_TOKEN"]
 
     def halt(latch=False):
         epoch = gate.halt(latch)
-        explorer.stop_exploration()
-        planner.cancel_goal()
+        if explorer:
+            explorer.stop_exploration()
+        if planner:
+            planner.cancel_goal()
         return epoch
 
     class Handler(BaseHTTPRequestHandler):
@@ -125,6 +147,13 @@ def main():
                         }
                         result["navigation"] = navigation_status.snapshot(result)
                     elif self.path == "/mode":
+                        capability = {
+                            "teleop": "teleop",
+                            "explore": "exploration",
+                            "agent": "humancli",
+                        }.get(data["mode"])
+                        if capability:
+                            require(session_profile, capability)
                         halt()
                         # Clear queued velocities from the old planner mission before enabling.
                         time.sleep(0.3)
@@ -153,10 +182,16 @@ def main():
                         # velocity gate before cancelling either producer.
                         if not gate.navigation(data["epoch"], False):
                             raise ValueError("The instruction lost control of the robot")
-                        explorer.stop_exploration()
-                        planner.cancel_goal()
+                        if explorer:
+                            explorer.stop_exploration()
+                        if planner:
+                            planner.cancel_goal()
                         result = {"ok": True, "navigation": "paused"}
                         if self.path != "/agent/pause":
+                            require(
+                                session_profile,
+                                "exploration" if self.path == "/agent/explore" else "navigation",
+                            )
                             time.sleep(0.3)
                             if not gate.navigation(data["epoch"], True):
                                 raise ValueError("The instruction lost control of the robot")

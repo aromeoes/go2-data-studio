@@ -1,16 +1,19 @@
 const { app, BrowserWindow, dialog, Menu, powerMonitor, powerSaveBlocker, session, shell } = require('electron');
 const { existsSync, readFileSync, writeFileSync, mkdirSync } = require('node:fs');
 const path = require('node:path');
+const { allowPermission } = require('./permissions.cjs');
 const { Backend, validateRuntime } = require('./backend.cjs');
 
 let window, backend, quitting = false, checkingQuit = false, blocker;
 const steamLaunch = process.argv.includes('--steam');
-app.setName('Go2 Data Studio');
+// Preserve existing credentials, recordings and the single-instance identity.
+app.setPath('userData', path.join(app.getPath('appData'), 'Go2 Data Studio'));
+app.setName('DIMENSIONAL');
 if (!app.requestSingleInstanceLock()) app.quit();
 else {
   app.on('second-instance', () => { window?.show(); window?.focus(); });
   app.whenReady().then(start).catch(async error => {
-    dialog.showErrorBox('Go2 Data Studio could not start', error.message);
+    dialog.showErrorBox('DIMENSIONAL could not start', error.message);
     // Startup has not exposed the dashboard and therefore cannot have connected a robot.
     if (backend?.child && !backend.exited) backend.child.kill('SIGTERM');
     quitting = true;
@@ -60,13 +63,17 @@ async function start() {
     if (new URL(details.url).origin === backend.origin) headers['X-Go2-Desktop'] = backend.token;
     callback({ requestHeaders: headers });
   });
-  webSession.setPermissionRequestHandler((contents, permission, callback) => {
-    const trusted = contents && new URL(contents.getURL()).origin === backend.origin;
-    callback(!!trusted && ['fullscreen', 'clipboard-sanitized-write'].includes(permission));
+  webSession.setPermissionCheckHandler((contents, permission, origin, details) =>
+    allowPermission(backend.origin, contents?.getURL(), permission, { ...details, origin }));
+  webSession.setPermissionRequestHandler((contents, permission, callback, details) => {
+    callback(allowPermission(backend.origin, contents?.getURL(), permission, details));
   });
   window = new BrowserWindow({
     width: 1280, height: 800, minWidth: 800, minHeight: 600,
-    backgroundColor: '#141917', title: 'Go2 Data Studio', show: false,
+    backgroundColor: '#141917', title: 'DIMENSIONAL', show: false,
+    icon: process.platform === 'linux'
+      ? (app.isPackaged ? path.join(process.resourcesPath, '..', 'icon.png') : path.join(__dirname, 'assets', 'icon.png'))
+      : undefined,
     fullscreen: steamLaunch, autoHideMenuBar: process.platform === 'linux',
     webPreferences: { session: webSession, nodeIntegration: false, contextIsolation: true, sandbox: true },
   });
@@ -86,7 +93,7 @@ async function start() {
     if (!quitting && !checkingQuit) dialog.showErrorBox('DimOS stopped', 'The local backend exited. It will not reconnect or resume movement automatically. Inspect the data-folder logs before restarting.');
   };
   Menu.setApplicationMenu(Menu.buildFromTemplate([
-    { label: 'Go2 Data Studio', submenu: [
+    { label: 'DIMENSIONAL', submenu: [
       { role: 'about' },
       { type: 'separator' },
       { label: 'Open data folder', click: () => void shell.openPath(options.data) },
@@ -97,7 +104,7 @@ async function start() {
     { label: 'Edit', submenu: [{ role: 'undo' }, { role: 'redo' }, { role: 'cut' }, { role: 'copy' }, { role: 'paste' }, { role: 'selectAll' }] },
     { label: 'View', submenu: [{ role: 'togglefullscreen' }, { role: 'zoomIn' }, { role: 'zoomOut' }, { role: 'resetZoom' }] },
   ]));
-  app.setAboutPanelOptions({ applicationName: 'Go2 Data Studio', applicationVersion: app.getVersion(),
+  app.setAboutPanelOptions({ applicationName: 'DIMENSIONAL', applicationVersion: app.getVersion(),
     comments: 'Local Go2 mapping, recording and control. Powered by DimOS and the DimOS Web SDK.' });
   // Idle sleep is inhibited while this control application is open. Manual sleep
   // cannot be guaranteed safe: pause events complement robot-side watchdogs.

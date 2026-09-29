@@ -7,6 +7,7 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 from go2_setup.navigation_goal import local_goal
+from go2_setup.profiles import enabled
 
 
 class Empty(BaseModel):
@@ -86,30 +87,69 @@ TOOLS = [
 ]
 
 
-def capabilities(vision=True):
+TOOL_CAPABILITIES = {
+    "move_relative": "navigation",
+    "start_exploration": "exploration",
+    "camera_view": "camera",
+    "start_recording": "recording",
+    "save_recording": "recording",
+}
+
+
+def tools_for(config=None):
+    if config and config.get("kind") == "vector":
+        from go2_setup.vector.tools import TOOLS as VECTOR_TOOLS
+        return [t for t in TOOLS if t[0] in {"robot_status", "stop_navigation", "camera_view"}] + VECTOR_TOOLS
+    return TOOLS
+
+
+def tool_enabled(name, config=None):
+    if config and config.get("kind") == "vector":
+        return (enabled(config, "humancli") and name in {t[0] for t in tools_for(config)}
+                and (name != "camera_view" or enabled(config, "camera"))
+                and (name not in {"find_person", "visible_faces"} or enabled(config, "faces")))
+    return config is None or (
+        enabled(config, "humancli")
+        and (name not in TOOL_CAPABILITIES or enabled(config, TOOL_CAPABILITIES[name]))
+    )
+
+
+def capabilities(vision=True, config=None):
     return [
         {"name": name, "example": example, "detail": description}
-        for name, _, description, example in TOOLS
-        if vision or name != "camera_view"
+        for name, _, description, example in tools_for(config)
+        if (vision or name != "camera_view") and tool_enabled(name, config)
     ]
 
 
-def definitions(vision):
+def definitions(vision, config=None):
     return [
         {"name": name, "description": description, "inputSchema": schema.model_json_schema()}
-        for name, schema, description, _ in TOOLS
-        if vision or name != "camera_view"
+        for name, schema, description, _ in tools_for(config)
+        if (vision or name != "camera_view") and tool_enabled(name, config)
     ]
 
 
 def execute(owner, turn, name, arguments):
-    schemas = {n: schema for n, schema, _, _ in TOOLS}
+    config = getattr(owner.supervisor, "profile", None)
+    schemas = {n: schema for n, schema, _, _ in tools_for(config)}
     if name not in schemas:
         raise ValueError("Tool is not enabled")
     args = schemas[name].model_validate(arguments)
     s = owner.supervisor
     with s.lock:
         owner.require_current(turn)
+        if not tool_enabled(name, getattr(s, "profile", None)):
+            raise ValueError("This tool is disabled in the session profile")
+        if config and config.get("kind") == "vector":
+            from go2_setup.vector.tools import SCHEMAS
+            if name in SCHEMAS:
+                if name == "move_relative":
+                    if turn["moved"]:
+                        raise ValueError("Only one movement per message")
+                    turn["moved"] = True
+                result = s.call("/vector/action", {"epoch": turn["epoch"], "name": name, "arguments": args.model_dump()})
+                return {"content": [{"type": "text", "text": json.dumps(result)}]}
         if name == "robot_status":
             # No raw imagery, maps, paths, IP, robot serial or credentials.
             result = {
@@ -119,6 +159,8 @@ def execute(owner, turn, name, arguments):
                 "navigation": s.telemetry.get("navigation"),
                 "sensors": s.telemetry.get("sensors"),
                 "recording": bool(s.session),
+                "vector": s.telemetry.get("vector"),
+                "control": s.telemetry.get("control"),
             }
         elif name == "move_relative":
             if turn["moved"]:

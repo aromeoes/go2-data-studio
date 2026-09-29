@@ -13,6 +13,8 @@ import os
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
+from starlette.concurrency import run_in_threadpool
+from go2_setup.speech import Speech, MAX_AUDIO_BYTES, AUDIO_TYPES
 from pydantic import BaseModel, Field
 import uvicorn
 
@@ -28,11 +30,27 @@ from go2_setup.supervisor import Supervisor
 from go2_setup.sdk_relay import ConsoleRelay
 from go2_setup.sdk_control import CommandOwner
 from go2_setup.platform_files import reveal_file
+from go2_setup.profiles import catalog as profile_catalog, profile, require
 
 
 class ConnectBody(BaseModel):
     ip: str = ""
     segment_id: str | None = None
+    robot_id: str | None = None
+
+
+class RobotBody(BaseModel):
+    name: str = Field(min_length=1, max_length=80)
+    ip: str
+    serial: str = Field(default="", max_length=100)
+    kind: str = "go2"
+    sdk_config: str = ""
+
+
+class ProfileBody(BaseModel):
+    robot_id: str | None = None
+    preset: str
+    enabled: list[str]
 
 
 class NameBody(BaseModel):
@@ -72,10 +90,6 @@ class MapBody(BaseModel):
     pgo: bool = True
 
 
-class DisconnectBody(BaseModel):
-    parked_confirmed: bool = False
-
-
 class VisionBody(BaseModel):
     api_key: str = Field(default="", repr=False)
     enabled: bool = True
@@ -104,6 +118,12 @@ def create_app(settings: Settings | None = None):
     supervisor.relay = relay
     jobs = MapJobs(settings, catalog)
     agent = NavigatorAgent(supervisor, jobs)
+    speech = Speech(agent.config)
+    from go2_setup.vector.voice import WirePodVoice, Transcript
+    wirepod = WirePodVoice(settings.root, supervisor, agent)
+    from go2_setup.vector.services import VectorServices
+    vector_services = VectorServices(settings, supervisor, wirepod, agent.config)
+    wirepod.services = vector_services
     cloud = CloudBackups(settings, catalog)
     import_lock = threading.Lock()
     command_owner = CommandOwner()
@@ -113,20 +133,24 @@ def create_app(settings: Settings | None = None):
     async def lifespan(app):
         try:
             relay.start()
+            vector_services.start()
             yield
         finally:
+            vector_services.close()
             agent.close()
             cloud.close()
             jobs.close()
             supervisor.close()
             relay.stop()
 
-    app = FastAPI(title="Go2 Space Setup", lifespan=lifespan)
+    app = FastAPI(title="DIMENSIONAL", lifespan=lifespan)
     app.state.supervisor = supervisor
     app.state.catalog = catalog
     app.state.jobs = jobs
     app.state.cloud = cloud
     app.state.agent = agent
+    app.state.wirepod = wirepod
+    app.state.vector_services = vector_services
 
     @app.middleware("http")
     async def local_only(request: Request, call_next):
@@ -137,7 +161,8 @@ def create_app(settings: Settings | None = None):
             bridge = secrets.compare_digest(
                 request.headers.get("authorization", ""), "Bearer " + supervisor.token
             )
-            if not desktop and not bridge:
+            voice_request = request.url.path in {"/api/vector/wirepod/session", "/api/vector/wirepod/transcript", "/api/vector/wirepod/audio"} and wirepod.authorized(request.headers.get("authorization", ""))
+            if not desktop and not bridge and not voice_request:
                 return JSONResponse({"detail": "Desktop session required"}, status_code=403)
         if desktop_closing and request.method not in {"GET", "HEAD"}:
             return JSONResponse({"detail": "Application is closing"}, status_code=409)
@@ -181,6 +206,7 @@ def create_app(settings: Settings | None = None):
             "events": [{**e, "message": english(e["message"])} for e in catalog.events()],
             "cloud": cloud.status(),
             "agent": agent.snapshot(),
+            "vector_services": vector_services.status(),
         }
 
     def desktop_only(request):
@@ -258,6 +284,11 @@ def create_app(settings: Settings | None = None):
             return clear()
         if path in {"/posture/stand", "/posture/lie"}:
             return posture(path.rsplit("/", 1)[1])
+        if path == "/vector/personality":
+            if supervisor.robot_kind != "vector":
+                raise ValueError("Connect Vector first")
+            agent.cancel()
+            return supervisor.call("/vector/personality")
         if path == "/agent":
             return instruction(TextBody(**body))
         raise ValueError("Unsupported SDK command")
@@ -301,6 +332,41 @@ def create_app(settings: Settings | None = None):
             raise ValueError("Confirm permanent deletion of the recording and its generated maps")
         return remove_segment(ident, catalog, supervisor, jobs, cloud)
 
+    @app.get("/api/setup")
+    def setup():
+        return {
+            **profile_catalog(),
+            "robots": supervisor.robots.list(),
+            "supported_robots": ["go2", "vector"],
+            "embodiments": {"go2": profile_catalog(), "vector": __import__("go2_setup.vector.profiles", fromlist=["catalog"]).catalog()},
+        }
+
+    @app.post("/api/robots")
+    def add_robot(body: RobotBody):
+        return supervisor.robots.save(**body.model_dump())
+
+    @app.post("/api/robots/{ident}")
+    def edit_robot(ident: str, body: RobotBody):
+        with supervisor.lock:
+            if supervisor.target and supervisor.robot_id == ident:
+                raise ValueError("Disconnect this robot before editing its connection")
+            return supervisor.robots.save(**body.model_dump(), ident=ident)
+
+    @app.get("/api/robots/availability")
+    def robot_availability():
+        return supervisor.robots.availability()
+
+    @app.post("/api/session/profile")
+    def session_profile(body: ProfileBody):
+        config = profile(body.preset, body.enabled, kind=supervisor.robot_kind)
+        # Cancel only after validation. The supervisor requires idle and no recording.
+        with supervisor.lock:
+            if body.robot_id != supervisor.robot_id:
+                raise ValueError("The selected robot changed. Reopen Session setup.")
+            result = supervisor.apply_profile(config)
+        agent.new_conversation()
+        return result
+
     @app.post("/api/connect")
     def connect(body: ConnectBody):
         with supervisor.lock:
@@ -312,19 +378,22 @@ def create_app(settings: Settings | None = None):
                 if segment["status"] in {"recording", "importing"}:
                     raise ValueError("Save the recording before replaying it")
                 replay = segment["path"]
-            supervisor.connect(body.ip, replay)
+            if body.robot_id and replay:
+                raise ValueError("Choose a robot or a replay, not both")
+            if body.robot_id:
+                saved = supervisor.robots.get(body.robot_id)
+                config = saved["profile"] if saved["kind"] == "vector" else profile("preview")
+                supervisor.connect(robot_id=body.robot_id, config=config)
+            else:
+                supervisor.connect(body.ip, replay)
         return {"ok": True}
 
     @app.post("/api/disconnect")
-    def disconnect(body: DisconnectBody | None = None):
+    def disconnect():
         with supervisor.lock:
             physical = supervisor.target and not supervisor.target.get("replay")
-            if physical and (not body or not body.parked_confirmed):
-                raise ValueError(
-                    "Before disconnecting, lie Go2 down and visually confirm it is supported"
-                )
             if physical and supervisor.mode != "idle":
-                raise ValueError("Stop movement before confirming disconnection")
+                raise ValueError("Stop movement before disconnecting")
             supervisor.disconnect()
         return {"ok": True}
 
@@ -457,6 +526,88 @@ def create_app(settings: Settings | None = None):
             body.enabled,
         )
         return result
+
+    @app.post("/api/vector/wirepod/enable")
+    def enable_wirepod():
+        return wirepod.enable()
+
+    def wirepod_only(request):
+        if not wirepod.authorized(request.headers.get("authorization", "")):
+            raise HTTPException(403, "wire-pod authorization required")
+
+    @app.get("/api/vector/wirepod/session")
+    def wirepod_session(request: Request):
+        wirepod_only(request)
+        return wirepod.session()
+
+    @app.post("/api/vector/wirepod/transcript")
+    def wirepod_transcript(request: Request, body: Transcript):
+        wirepod_only(request)
+        return wirepod.submit(body)
+
+    @app.post("/api/vector/wirepod/audio")
+    async def vector_audio(request: Request):
+        wirepod_only(request)
+        def current():
+            with supervisor.lock:
+                if (
+                    supervisor.robot_kind != "vector"
+                    or supervisor.connection != "online"
+                    or request.headers.get("X-Vector-Serial") != supervisor.target.get("serial")
+                ):
+                    raise ValueError("Vector voice session is not active")
+                return supervisor.epoch, supervisor.robot_id
+        session = current()
+        if request.headers.get("content-type") != "audio/wav":
+            raise HTTPException(415, "Vector requires WAV audio")
+        audio = bytearray()
+        async for chunk in request.stream():
+            if len(audio) + len(chunk) > MAX_AUDIO_BYTES:
+                raise HTTPException(413, "Voice clip exceeds 2 MB")
+            audio.extend(chunk)
+        if current() != session:
+            raise ValueError("Vector voice session changed")
+        try:
+            text = await run_in_threadpool(speech.transcribe, bytes(audio), "audio/wav")
+        except ValueError as error:
+            vector_services.voice_result(str(error))
+            raise
+        if current() != session:
+            raise ValueError("Vector voice session changed")
+        vector_services.voice_result()
+        # Transcription alone does not submit an agent action. Native intents stay
+        # in wire-pod; the explicit Dimensional prefix uses the guarded endpoint.
+        return {"text": text}
+
+    @app.post("/api/agent/transcribe")
+    async def transcribe(request: Request, epoch: int):
+        def require_current():
+            with supervisor.lock:
+                require(supervisor.profile, "voice")
+                if (
+                    supervisor.connection != "online"
+                    or supervisor.mode != "agent"
+                    or supervisor.epoch != epoch
+                ):
+                    raise ValueError("Voice cancelled: the control session changed")
+                if agent.busy:
+                    raise ValueError("Wait for HumanCLI to finish before speaking")
+
+        require_current()
+        content_type = request.headers.get("content-type", "").split(";", 1)[0].strip()
+        if content_type not in AUDIO_TYPES:
+            raise HTTPException(415, "Unsupported audio format")
+        audio = bytearray()
+        async for chunk in request.stream():
+            if len(audio) + len(chunk) > MAX_AUDIO_BYTES:
+                raise HTTPException(413, "Voice clip exceeds 2 MB")
+            audio.extend(chunk)
+        require_current()
+        text = await run_in_threadpool(speech.transcribe, bytes(audio), content_type)
+        require_current()
+        # Returning text cannot trigger movement. The existing agent endpoint
+        # validates the lease again when the operator's client submits it.
+        return {"text": text}
 
     @app.post("/api/agent")
     def instruction(body: TextBody):

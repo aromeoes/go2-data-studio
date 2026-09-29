@@ -1,4 +1,5 @@
 import { Cloud, Check, ExternalLink, Pause, Upload } from "lucide-react";
+import { QRCodeSVG } from "qrcode.react";
 import type { Item, State } from "./types";
 
 type Action = (name: string, fn: () => Promise<unknown>) => Promise<void>;
@@ -31,7 +32,20 @@ export function CloudPanel({
       </p>
       {cloud.login ? (
         <div role="status" className="cloud-login">
-          <p>Approve this device in your browser:</p>
+          <p>Scan with your phone, sign in, and approve this device.</p>
+          {cloud.login.expires_at > Date.now() / 1000 ? (
+            <QRCodeSVG
+              className="cloud-login-qr"
+              value={cloud.login.url}
+              size={192}
+              marginSize={4}
+              level="M"
+              title="Scan to connect this device to DimOS Cloud"
+            />
+          ) : (
+            <p>Code expired. Wait for a new sign-in attempt.</p>
+          )}
+          <small>If asked, enter this code on your phone:</small>
           <strong className="mono">{cloud.login.code}</strong>
           <a href={cloud.login.url} target="_blank" rel="noreferrer">
             Open sign-in <ExternalLink size={13} />

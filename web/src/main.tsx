@@ -11,7 +11,9 @@ import {
   Download,
   Folder,
   Layers,
+  LoaderCircle,
   Map,
+  Mic,
   Pause,
   Pencil,
   Trash2,
@@ -32,15 +34,22 @@ import { robot } from "./sdk";
 if (new URLSearchParams(window.location.search).get("input") === "controller") {
   robot.selectInput("controller");
 }
+import { usePushToTalk } from "./usePushToTalk";
+import { useControllerTakeover } from "./useControllerTakeover";
 import { useControllerStop } from "./useControllerStop";
 import { useControllerNavigation } from "./useControllerNavigation";
 
 import type { Item, State } from "./types";
 import { MapCanvas } from "./MapCanvas";
+import { SessionSetup } from "./SessionSetup";
+const available = (state: State | null, capability: string) =>
+  !state?.profile || state.profile.enabled.includes(capability);
 import { HumanCLISettings } from "./HumanCLISettings";
 import { HumanCLIHelp } from "./HumanCLIHelp";
+import { ControllerDiagram } from "./ControllerDiagram";
 import { TeleopPad } from "./TeleopPad";
 import { CloudPanel, BackupControl } from "./Cloud";
+import { VectorSensors } from "./VectorSensors";
 import { BatteryStatus, NavigationPanel } from "./RobotStatus";
 const gb = (n = 0) =>
   (n / 1e9).toLocaleString("en-US", {
@@ -81,6 +90,7 @@ async function api(path: string, data: unknown = {}) {
       "/stop",
       "/clear",
       "/agent",
+      "/vector/personality",
       "/posture/stand",
       "/posture/lie",
     ].includes(path)
@@ -117,10 +127,16 @@ export function App() {
   const [chat, setChat] = useState("");
   const [controlView, setControlView] = useState<string | null>(null);
   const [disconnectDialog, setDisconnectDialog] = useState(false);
-  const [parked, setParked] = useState(false);
   const [armed, setArmed] = useState(false);
-  useControllerNavigation(() => robot.inputSource === "controller" && !armed);
+  useControllerNavigation(
+    () => robot.inputSource === "controller" && !armed && !voice.active,
+  );
   const [teleopSpeed, setTeleopSpeed] = useState(0.5);
+  useEffect(() => {
+    const kind = state?.robot_kind || "go2";
+    robot.embodiment = kind;
+    setTeleopSpeed(kind === "vector" ? 0.1 : 0.5);
+  }, [state?.robot_kind]);
   const [pressed, setPressed] = useState<string[]>([]);
   const emitTeleop = useRef<(() => void) | null>(null);
   const [tab, setTab] = useState<"sessions" | "maps" | "events">("sessions");
@@ -132,6 +148,11 @@ export function App() {
   const keys = useRef(new Set<string>());
   const stateRef = useRef<State | null>(null);
   const heldEpoch = useRef<number | null>(null);
+  const chatLog = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const log = chatLog.current;
+    if (log) log.scrollTop = log.scrollHeight;
+  }, [state?.agent.messages.length, controlView]);
   const refresh = async () => {
     try {
       let value = robot.current();
@@ -194,7 +215,56 @@ export function App() {
       setPending("");
     }
   };
+  const voice = usePushToTalk(
+    {
+      begin: async () => {
+        const s = stateRef.current;
+        if (!available(s, "voice"))
+          throw Error("Voice is disabled. Enable it in Session setup.");
+        if (s?.connection !== "online")
+          throw Error("Connect your robot before speaking.");
+        if (
+          !s.agent.model?.configured ||
+          s.agent.model.provider !== "openai" ||
+          s.agent.model.base_url
+        )
+          throw Error("Configure OpenAI in HumanCLI settings to use voice.");
+        if (s.agent.busy)
+          throw Error("Wait for HumanCLI to finish before speaking.");
+        if (pending || modal || disconnectDialog)
+          throw Error("Finish the current dialog or action first.");
+        robot.disarm();
+        heldEpoch.current = null;
+        setArmed(false);
+        keys.current.clear();
+        setPressed([]);
+        const result = await api("/mode", { mode: "agent" });
+        heldEpoch.current = result.epoch;
+        setControlView("agent");
+        return result.epoch;
+      },
+      valid: (epoch) =>
+        heldEpoch.current === epoch &&
+        stateRef.current?.connection === "online" &&
+        (stateRef.current?.epoch ?? 0) <= epoch,
+      release: (epoch) => {
+        if (heldEpoch.current === epoch) heldEpoch.current = null;
+        void api("/release", { epoch }).catch(() => {});
+      },
+      submit: async (text, epoch) => {
+        setControlView("agent");
+        setChat(text);
+        await api("/agent", { text, epoch, space_id: selected || null });
+        setChat("");
+        await refresh();
+      },
+    },
+    () =>
+      robot.inputSource === "controller" &&
+      available(stateRef.current, "voice"),
+  );
   const halt = () => {
+    voice.capture.cancel();
     robot.machine?.estop();
     robot.disarm();
     heldEpoch.current = null;
@@ -204,7 +274,60 @@ export function App() {
     void action("stop", () => api("/stop"));
   };
   useControllerStop(() => robot.inputSource === "controller", halt);
+  useControllerTakeover({
+    enabled: () =>
+      robot.inputSource === "controller" &&
+      robot.ready &&
+      stateRef.current?.connection === "online" &&
+      available(stateRef.current, "teleop") &&
+      !pending &&
+      !modal &&
+      !disconnectDialog &&
+      !voice.active,
+    speed: () => teleopSpeed,
+    kind: () => stateRef.current?.robot_kind || "go2",
+    input: (value) => robot.gamepad(value),
+    stop: () => {
+      robot.disarm();
+      setArmed(false);
+      keys.current.clear();
+      setPressed([]);
+    },
+    error: setError,
+    take: async (signal) => {
+      voice.capture.cancel();
+      robot.disarm();
+      setError("");
+      keys.current.clear();
+      setPressed([]);
+      heldEpoch.current = null;
+      setControlView("teleop");
+      // A fresh centered L1 press is an explicit request to resume manual control.
+      // Physical sensor gates and the SDK lease still apply.
+      if (stateRef.current?.telemetry.control?.estop) await api("/clear");
+      if (signal.aborted) return () => {};
+      const result = await api("/mode", { mode: "teleop" });
+      const release = () => {
+        if (heldEpoch.current === result.epoch) {
+          heldEpoch.current = null;
+          robot.disarm();
+          setArmed(false);
+        }
+        void api("/release", { epoch: result.epoch }).catch(() => {});
+      };
+      if (signal.aborted) return release;
+      heldEpoch.current = result.epoch;
+      try {
+        robot.arm(teleopSpeed);
+      } catch (error) {
+        release();
+        throw error;
+      }
+      return release;
+    },
+  });
   const mode = async (next: string) => {
+    voice.capture.cancel();
     if (next !== "idle") setControlView(next);
     robot.disarm();
     setArmed(false);
@@ -217,6 +340,7 @@ export function App() {
     });
   };
   const posture = async (next: "stand" | "lie") => {
+    voice.capture.cancel();
     robot.disarm();
     heldEpoch.current = null;
     setArmed(false);
@@ -229,6 +353,7 @@ export function App() {
     });
   };
   const toggleKeyboard = async () => {
+    voice.capture.cancel();
     const previous = heldEpoch.current;
     heldEpoch.current = null;
     keys.current.clear();
@@ -400,6 +525,37 @@ export function App() {
     void action("open", () => api(`/open/${id}/${kind}`));
   return (
     <div className="app">
+      {voice.active && (
+        <div className="voice-overlay" role="status" aria-live="polite">
+          <div className={"voice-orb " + voice.phase}>
+            {voice.phase === "recording" ? (
+              <Mic size={36} />
+            ) : (
+              <LoaderCircle size={36} />
+            )}
+          </div>
+          <strong>
+            {voice.phase === "recording"
+              ? "Listening"
+              : voice.phase === "transcribing"
+                ? "Transcribing"
+                : "Getting ready"}
+          </strong>
+          <span>
+            {voice.phase === "recording"
+              ? "Release R1 to send"
+              : voice.phase === "transcribing"
+                ? "Sending your words to HumanCLI"
+                : "Opening microphone"}
+          </span>
+          <button
+            onClick={() => voice.capture.cancel()}
+            aria-label="Cancel voice recording"
+          >
+            Cancel · B / Esc
+          </button>
+        </div>
+      )}
       <aside className="rail">
         <div className="brand">
           <div className="brandmark">
@@ -477,7 +633,14 @@ export function App() {
       <main>
         <header>
           <div className="breadcrumb">
-            Go2 <ChevronRight size={13} /> <span>Space setup</span>
+            Robots <ChevronRight size={13} />{" "}
+            <span>
+              {state.connection === "offline"
+                ? "My robots"
+                : state.robot_kind === "vector"
+                  ? "Vector workspace"
+                  : "Go2 workspace"}
+            </span>
           </div>
           <div className="top-right">
             <BatteryStatus state={state} connected={connected} />
@@ -487,71 +650,108 @@ export function App() {
                 ? "Console offline"
                 : state.replay
                   ? "REPLAY · recording"
-                  : labels[state.connection]}
+                  : state.robot_kind === "vector"
+                    ? labels[state.connection]?.replace("Go2", "Vector")
+                    : labels[state.connection]}
             </span>
             <button className="stop" onClick={halt}>
               <Square size={13} fill="currentColor" />
-              Stop
+              Emergency stop
             </button>
           </div>
         </header>
         <section className="heading">
           <div>
             <div className="eyebrow">
-              SPACE SETUP <span>PHASE 01</span>
+              ROBOT WORKSPACE{" "}
+              <span>
+                {state.profile?.preset === "preview" ||
+                state.connection === "offline"
+                  ? "SETUP"
+                  : "SESSION"}
+              </span>
             </div>
             <h1>
-              {space?.name || "A new space to explore"}
+              {state.profile && state.connection === "offline"
+                ? "Your robots"
+                : state.profile?.preset === "preview"
+                  ? "Set up your session"
+                  : space?.name || "Robot workspace"}
               <span className="title-dot">.</span>
-              {space && (
-                <button
-                  className="rename-space"
-                  aria-label="Rename space"
-                  title="Rename space"
-                  disabled={!!pending}
-                  onClick={() => {
-                    setRenameId(space.id);
-                    setInput(space.name || "");
-                    setError("");
-                    setModal("rename");
-                  }}
-                >
-                  <Pencil size={17} />
-                </button>
-              )}
+              {space &&
+                (!state.profile ||
+                  (state.connection !== "offline" &&
+                    state.profile.preset !== "preview")) && (
+                  <button
+                    className="rename-space"
+                    aria-label="Rename space"
+                    title="Rename space"
+                    disabled={!!pending}
+                    onClick={() => {
+                      setRenameId(space.id);
+                      setInput(space.name || "");
+                      setError("");
+                      setModal("rename");
+                    }}
+                  >
+                    <Pencil size={17} />
+                  </button>
+                )}
             </h1>
-            <p>Explore, record, and map your space.</p>
+            <p>
+              {state.profile && state.connection === "offline"
+                ? "Choose a saved robot or add one on your Wi-Fi."
+                : "Drive, explore, and work with your robot."}
+            </p>
           </div>
-          <div className="connect">
-            <label htmlFor="robot-ip">GO2 IP ADDRESS</label>
-            <div>
-              <input
-                id="robot-ip"
-                value={ip}
-                onChange={(e) => setIp(e.target.value)}
-                placeholder="192.168.1.20"
-                disabled={state.connection !== "offline"}
-              />
+          {state.profile ? (
+            state.connection !== "offline" && (
               <button
                 className="primary"
                 disabled={!!pending}
                 onClick={() => {
-                  if (state.connection === "offline") {
-                    void action("connect", () => api("/connect", { ip }));
-                  } else if (state.replay) {
+                  if (state.replay)
                     void action("disconnect", () => api("/disconnect"));
-                  } else {
-                    setParked(false);
+                  else {
                     setDisconnectDialog(true);
                     if (connected) void mode("idle");
                   }
                 }}
               >
-                <Wifi size={15} />
-                {state.connection === "offline" ? "Connect" : "Disconnect"}
+                Disconnect
               </button>
+            )
+          ) : (
+            <div className="connect">
+              <label htmlFor="robot-ip">GO2 IP ADDRESS</label>
+              <div>
+                <input
+                  id="robot-ip"
+                  value={ip}
+                  onChange={(e) => setIp(e.target.value)}
+                  placeholder="192.168.1.20"
+                  disabled={state.connection !== "offline"}
+                />
+                <button
+                  className="primary"
+                  disabled={!!pending}
+                  onClick={() => {
+                    if (state.connection === "offline") {
+                      void action("connect", () => api("/connect", { ip }));
+                    } else if (state.replay) {
+                      void action("disconnect", () => api("/disconnect"));
+                    } else {
+                      setDisconnectDialog(true);
+                      if (connected) void mode("idle");
+                    }
+                  }}
+                >
+                  <Wifi size={15} />
+                  {state.connection === "offline" ? "Connect" : "Disconnect"}
+                </button>
+              </div>
             </div>
-          </div>
+          )}
         </section>
         {(error || state.error || !online) && (
           <div className="alert" role="alert">
@@ -573,352 +773,603 @@ export function App() {
             Playing recorded data. Controls do not move a physical robot.
           </div>
         )}
-        <div className="workspace">
-          <section className="map-panel panel">
-            <div className="panel-head">
-              <div>
-                <Map size={16} />
-                <strong>Space map</strong>
-                <span className="tiny-pill">2D · OCCUPANCY</span>
-              </div>
-              <span className="mono">
-                {state.telemetry.map
-                  ? state.telemetry.map.known_m2.toFixed(1) + " m² observed"
-                  : "No data yet"}
-              </span>
-            </div>
-            <MapCanvas
-              grid={state.telemetry.map}
-              pose={state.telemetry.pose}
-              path={state.telemetry.path}
-            />
-            <div className="map-footer">
-              <span>
-                <i className={connected ? "live-dot" : "offline-dot"} />
-                {state.telemetry.map
-                  ? "Preview map · updated by LiDAR"
-                  : "Waiting for sensors"}
-              </span>
-              <span className="mono">
-                {state.telemetry.pose
-                  ? `X ${state.telemetry.pose.x.toFixed(2)}  Y ${state.telemetry.pose.y.toFixed(2)} m`
-                  : "X · · ·   Y · · ·"}
-              </span>
-            </div>
-          </section>
-          <aside className="control-panel">
-            <section className="camera panel">
-              <div className="panel-head">
-                <div>
-                  <Camera size={16} />
-                  <strong>Front camera</strong>
-                </div>
-                <span className="mono">{hasCamera ? "RGB" : "NO SIGNAL"}</span>
-              </div>
-              <div className="camera-feed">
-                {hasCamera ? (
-                  <img src={robot.camera || undefined} alt="Go2 front camera" />
-                ) : (
-                  <>
-                    <Camera size={28} />
-                    <span>Camera feed appears when connected</span>
-                  </>
-                )}
-              </div>
-            </section>
-            {!robot.current() && state.connection === "online" && (
-              <p role="status">
-                {robot.error || "Connecting to DimOS Web SDK…"}
-              </p>
-            )}
-            <div className="sensor-health">
-              {[
-                ["lidar", "LiDAR"],
-                ["odom", "Position"],
-                ["color_image", "Camera"],
-              ].map(([key, label]) => (
-                <span key={key}>
-                  <i
-                    className={
-                      sensor[key] &&
-                      Date.now() / 1000 - sensor[key].received < 2
-                        ? "live-dot"
-                        : "offline-dot"
-                    }
-                  />
-                  {label}
-                </span>
-              ))}
-            </div>
-            <section className="controls panel">
-              <div className="panel-head">
-                <div>
-                  <Compass size={16} />
-                  <strong>Go2 controls</strong>
-                </div>
-                <span className="tiny-pill">{labels[state.mode]}</span>
-              </div>
-              <div className="mode-switch">
-                {[
-                  ["teleop", "Teleop"],
-                  ["explore", "Explore"],
-                  ["agent", "HumanCLI"],
-                ].map(([m, l]) => (
-                  <button
-                    key={m}
-                    disabled={!connected || !!pending}
-                    className={shownControl === m ? "active" : ""}
-                    onClick={() => mode(m)}
-                  >
-                    {m === "teleop" ? (
-                      <Radio size={16} />
-                    ) : m === "explore" ? (
-                      <Compass size={16} />
+        {state.profile && (
+          <SessionSetup
+            state={state}
+            api={api}
+            refresh={refresh}
+            pause={() => mode("idle")}
+            onApplied={() => {
+              voice.capture.cancel();
+              heldEpoch.current = null;
+              setArmed(false);
+              setControlView(null);
+              keys.current.clear();
+              setPressed([]);
+              robot.close();
+              void robot.start().catch((e) => setError(e.message));
+            }}
+          />
+        )}
+        {(!state.profile || state.connection !== "offline") && (
+          <div
+            className={
+              "workspace" +
+              (state.robot_kind === "vector" ? " vector-workspace" : "")
+            }
+          >
+            <div className="visual-panel">
+              {available(state, "camera") && (
+                <section className="camera panel">
+                  <div className="panel-head">
+                    <div>
+                      <Camera size={16} />
+                      <strong>Front camera</strong>
+                    </div>
+                    <span className="mono">
+                      {hasCamera ? "RGB" : "NO SIGNAL"}
+                    </span>
+                  </div>
+                  <div className="camera-feed">
+                    {hasCamera ? (
+                      <img
+                        src={robot.camera || undefined}
+                        alt={`${state.robot_kind === "vector" ? "Vector" : "Go2"} front camera`}
+                      />
                     ) : (
-                      <Terminal size={16} />
-                    )}
-                    {l}
-                  </button>
-                ))}
-              </div>
-              <NavigationPanel navigation={state.telemetry.navigation} />
-              {!state.telemetry.navigation &&
-                state.telemetry.control?.stop_reason && (
-                  <p role="status">{state.telemetry.control.stop_reason}</p>
-                )}
-              {state.telemetry.motion && (
-                <details className="motion-details">
-                  <summary>Motion diagnostics</summary>
-                  <div className="motion-status">
-                    <small>
-                      Transport: velocity commands · Sent:{" "}
-                      {state.telemetry.motion.sent}
-                    </small>
-                    {state.telemetry.motion.observed_speed !== undefined && (
-                      <small>
-                        Observed motion:{" "}
-                        {state.telemetry.motion.observed_speed.toFixed(2)} m/s ·
-                        rotation{" "}
-                        {(
-                          state.telemetry.motion.observed_yaw_rate ?? 0
-                        ).toFixed(2)}{" "}
-                        rad/s
-                      </small>
-                    )}
-                    {state.mode === "explore" && (
-                      <small>
-                        Planner commands received:{" "}
-                        {state.telemetry.control?.nav_received ?? 0} ·
-                        forwarded: {state.telemetry.control?.nav_forwarded ?? 0}
-                      </small>
-                    )}
-                    {state.telemetry.motion.error && (
-                      <p role="alert">{state.telemetry.motion.error}</p>
+                      <>
+                        <Camera size={28} />
+                        <span>
+                          {state.robot_kind === "vector" &&
+                          state.connection === "online"
+                            ? "Vector is connected, but no recent camera frames have arrived."
+                            : "Camera feed appears when connected"}
+                        </span>
+                      </>
                     )}
                   </div>
-                </details>
+                </section>
               )}
-              {shownControl === "teleop" ? (
-                <TeleopPad
-                  speed={teleopSpeed}
-                  setSpeed={setTeleopSpeed}
-                  armed={armed}
-                  disabled={
-                    !connected || !!pending || !!state.telemetry.control?.estop
-                  }
-                  pressed={pressed}
-                  toggle={() => void toggleKeyboard()}
-                  press={(key) => {
-                    if (!armed) return;
-                    keys.current.add(key);
-                    setPressed([...keys.current]);
-                    emitTeleop.current?.();
-                  }}
-                  release={(key) => {
-                    if (keys.current.delete(key)) {
+              {state.robot_kind === "vector" && (
+                <VectorSensors
+                  data={state.telemetry.vector}
+                  connected={connected}
+                />
+              )}
+              {available(state, "mapping") && (
+                <section className="map-panel panel">
+                  <div className="panel-head">
+                    <div>
+                      <Map size={16} />
+                      <strong>Space map</strong>
+                      <span className="tiny-pill">2D · OCCUPANCY</span>
+                    </div>
+                    <span className="mono">
+                      {state.telemetry.map
+                        ? state.telemetry.map.known_m2.toFixed(1) +
+                          " m² observed"
+                        : "No data yet"}
+                    </span>
+                  </div>
+                  <MapCanvas
+                    grid={state.telemetry.map}
+                    pose={state.telemetry.pose}
+                    path={state.telemetry.path}
+                  />
+                  <div className="map-footer">
+                    <span>
+                      <i className={connected ? "live-dot" : "offline-dot"} />
+                      {state.telemetry.map
+                        ? "Preview map · updated by LiDAR"
+                        : "Waiting for sensors"}
+                    </span>
+                    <span className="mono">
+                      {state.telemetry.pose
+                        ? `X ${state.telemetry.pose.x.toFixed(2)}  Y ${state.telemetry.pose.y.toFixed(2)} m`
+                        : "X · · ·   Y · · ·"}
+                    </span>
+                  </div>
+                </section>
+              )}
+              {!available(state, "camera") && !available(state, "mapping") && (
+                <section className="panel setup-body">
+                  <p>
+                    No visual streams selected. Enable Camera or Live mapping in
+                    Session setup.
+                  </p>
+                </section>
+              )}
+            </div>
+            <aside className="control-panel">
+              {!robot.current() && state.connection === "online" && (
+                <p role="status">
+                  {robot.error || "Connecting to DimOS Web SDK…"}
+                </p>
+              )}
+              <div className="sensor-health">
+                {[
+                  ["lidar", "LiDAR"],
+                  ["odom", "Position"],
+                  ["color_image", "Camera"],
+                ]
+                  .filter(
+                    ([key]) =>
+                      key === "odom" ||
+                      available(
+                        state,
+                        key === "color_image" ? "camera" : "lidar",
+                      ),
+                  )
+                  .map(([key, label]) => (
+                    <span key={key}>
+                      <i
+                        className={
+                          sensor[key] &&
+                          Date.now() / 1000 - sensor[key].received < 2
+                            ? "live-dot"
+                            : "offline-dot"
+                        }
+                      />
+                      {label}
+                    </span>
+                  ))}
+              </div>
+              <section className="controls panel">
+                <div className="panel-head">
+                  <div>
+                    <Compass size={16} />
+                    <strong>
+                      {state.robot_kind === "vector"
+                        ? "Vector controls"
+                        : "Go2 controls"}
+                    </strong>
+                  </div>
+                  <span className="tiny-pill">{labels[state.mode]}</span>
+                </div>
+                <div className="mode-switch">
+                  {[
+                    ["teleop", "Teleop"],
+                    ["explore", "Explore"],
+                    ["agent", "HumanCLI"],
+                  ].map(([m, l]) => (
+                    <button
+                      key={m}
+                      disabled={
+                        !connected ||
+                        !!pending ||
+                        voice.active ||
+                        !available(
+                          state,
+                          {
+                            teleop: "teleop",
+                            explore: "exploration",
+                            agent: "humancli",
+                          }[m]!,
+                        )
+                      }
+                      title={
+                        !available(
+                          state,
+                          {
+                            teleop: "teleop",
+                            explore: "exploration",
+                            agent: "humancli",
+                          }[m]!,
+                        )
+                          ? "Enable this capability in Session setup"
+                          : m === "explore"
+                            ? "Available through mapping and navigation"
+                            : undefined
+                      }
+                      className={shownControl === m ? "active" : ""}
+                      onClick={() => mode(m)}
+                    >
+                      {m === "teleop" ? (
+                        <Radio size={16} />
+                      ) : m === "explore" ? (
+                        <Compass size={16} />
+                      ) : (
+                        <Terminal size={16} />
+                      )}
+                      {l}
+                    </button>
+                  ))}
+                </div>
+                {shownControl !== "teleop" &&
+                  robot.inputSource === "controller" && (
+                    <>
+                      <ControllerDiagram />
+                      <p className="setup-footnote">
+                        Hold L1 to take Teleop control · Release to stop
+                      </p>
+                    </>
+                  )}
+                {state.robot_kind !== "vector" &&
+                  !available(state, "exploration") && (
+                    <p
+                      className="setup-footnote"
+                      style={{ padding: "10px 16px" }}
+                    >
+                      Explore requires mapping, navigation and exploration.
+                      Enable them in Session setup.
+                    </p>
+                  )}
+                {available(state, "navigation") && (
+                  <NavigationPanel navigation={state.telemetry.navigation} />
+                )}
+                {!state.telemetry.navigation &&
+                  state.telemetry.control?.stop_reason && (
+                    <p role="status">{state.telemetry.control.stop_reason}</p>
+                  )}
+                {state.telemetry.motion && (
+                  <details className="motion-details">
+                    <summary>Motion diagnostics</summary>
+                    <div className="motion-status">
+                      <small>
+                        Transport: velocity commands · Sent:{" "}
+                        {state.telemetry.motion.sent}
+                      </small>
+                      {state.telemetry.motion.observed_speed !== undefined && (
+                        <small>
+                          Observed motion:{" "}
+                          {state.telemetry.motion.observed_speed.toFixed(2)} m/s
+                          · rotation{" "}
+                          {(
+                            state.telemetry.motion.observed_yaw_rate ?? 0
+                          ).toFixed(2)}{" "}
+                          rad/s
+                        </small>
+                      )}
+                      {state.mode === "explore" && (
+                        <small>
+                          Planner commands received:{" "}
+                          {state.telemetry.control?.nav_received ?? 0} ·
+                          forwarded:{" "}
+                          {state.telemetry.control?.nav_forwarded ?? 0}
+                        </small>
+                      )}
+                      {state.telemetry.motion.error && (
+                        <p role="alert">{state.telemetry.motion.error}</p>
+                      )}
+                    </div>
+                  </details>
+                )}
+                {!available(
+                  state,
+                  {
+                    teleop: "teleop",
+                    explore: "exploration",
+                    agent: "humancli",
+                  }[shownControl] || "teleop",
+                ) ? (
+                  <div className="mode-info">
+                    <h3>
+                      {state.profile?.preset === "preview"
+                        ? "Connected and idle"
+                        : "Capability disabled"}
+                    </h3>
+                    <p>
+                      Choose your session capabilities above to enable controls.
+                    </p>
+                  </div>
+                ) : shownControl === "teleop" ? (
+                  <TeleopPad
+                    vector={state.robot_kind === "vector"}
+                    speed={teleopSpeed}
+                    setSpeed={setTeleopSpeed}
+                    armed={armed}
+                    disabled={
+                      !connected ||
+                      !!pending ||
+                      !!state.telemetry.control?.estop
+                    }
+                    pressed={pressed}
+                    toggle={() => void toggleKeyboard()}
+                    press={(key) => {
+                      if (!armed) return;
+                      keys.current.add(key);
                       setPressed([...keys.current]);
                       emitTeleop.current?.();
-                    }
-                  }}
-                />
-              ) : shownControl === "explore" ? (
-                <div className="navigation-actions">
-                  <button onClick={() => mode("idle")}>
-                    <Pause size={14} />
-                    Pause exploration
-                  </button>
-                </div>
-              ) : shownControl === "agent" ? (
-                <div className="humancli">
-                  <div className="humancli-heading">
-                    <strong>HumanCLI</strong>
-                    <HumanCLIHelp
-                      capabilities={state.agent.capabilities || []}
-                    />
-                    <button
-                      className="new-conversation"
-                      disabled={!!pending}
-                      onClick={() =>
-                        action("conversation", async () => {
-                          await api("/agent/conversation");
-                          setChat("");
-                        })
-                      }
-                    >
-                      New conversation
-                    </button>
-                  </div>
-                  {state.mode !== "agent" && (
-                    <div className="humancli-paused" role="status">
-                      <p>
-                        HumanCLI stays open while movement is paused. Enable it
-                        to send a new instruction.
-                      </p>
-                      <button
-                        disabled={
-                          !connected ||
-                          !!pending ||
-                          !!state.telemetry.control?.estop
-                        }
-                        onClick={() => mode("agent")}
-                      >
-                        Enable HumanCLI
-                      </button>
-                    </div>
-                  )}
-                  <p>
-                    DimOS agent ·{" "}
-                    {state.agent.model?.configured
-                      ? `${state.agent.model.provider} / ${state.agent.model.model}`
-                      : "Configure a model below to begin."}{" "}
-                    Movement stays within mapped clear space. Camera access is
-                    optional.
-                  </p>
-                  <HumanCLISettings
-                    config={state.agent.model}
-                    pending={!!pending || state.agent.busy}
-                    save={async (value) => {
-                      setPending("agent-config");
-                      try {
-                        await api("/agent/config", value);
-                        await refresh();
-                      } finally {
-                        setPending("");
+                    }}
+                    release={(key) => {
+                      if (keys.current.delete(key)) {
+                        setPressed([...keys.current]);
+                        emitTeleop.current?.();
                       }
                     }}
                   />
-                  {state.agent.busy && (
-                    <div className="agent-progress" role="status">
-                      <span>HumanCLI is working…</span>
+                ) : shownControl === "explore" ? (
+                  <div className="navigation-actions">
+                    <button onClick={() => mode("idle")}>
+                      <Pause size={14} />
+                      Pause exploration
+                    </button>
+                  </div>
+                ) : shownControl === "agent" ? (
+                  <div className="humancli">
+                    <div className="humancli-heading">
+                      <strong>HumanCLI</strong>
+                      <HumanCLIHelp
+                        capabilities={state.agent.capabilities || []}
+                      />
                       <button
+                        className="new-conversation"
+                        disabled={!!pending}
                         onClick={() =>
-                          action("agent-cancel", () => api("/agent/cancel"))
+                          action("conversation", async () => {
+                            await api("/agent/conversation");
+                            setChat("");
+                          })
                         }
                       >
-                        Cancel response
+                        New conversation
                       </button>
                     </div>
-                  )}
-                  <div className="messages">
-                    {!state.agent.messages.filter(
-                      (m) => Date.now() / 1000 - m.ts < 1800,
-                    ).length ? (
-                      <span className="muted">
-                        Try “walk one meter backward” or “what do you see?”.
-                      </span>
-                    ) : (
-                      state.agent.messages
-                        .filter((m) => Date.now() / 1000 - m.ts < 1800)
-                        .slice(-10)
-                        .map((m, i) => (
-                          <div key={i} className={"message " + m.role}>
-                            <small>
-                              {m.role === "user"
-                                ? "YOU"
-                                : m.role === "tool"
-                                  ? "TOOL"
-                                  : "HUMANCLI"}
-                            </small>
-                            {m.text}
-                          </div>
-                        ))
+                    {state.mode !== "agent" && (
+                      <div className="humancli-paused" role="status">
+                        <p>
+                          HumanCLI stays open while movement is paused. Enable
+                          it to send a new instruction.
+                        </p>
+                        <button
+                          disabled={
+                            !connected ||
+                            !!pending ||
+                            !!state.telemetry.control?.estop
+                          }
+                          onClick={() => mode("agent")}
+                        >
+                          Enable HumanCLI
+                        </button>
+                      </div>
                     )}
-                  </div>
-                  <form
-                    onSubmit={(e) => {
-                      e.preventDefault();
-                      void action("agent", async () => {
-                        if (
-                          stateRef.current?.mode !== "agent" ||
-                          heldEpoch.current === null
-                        )
-                          throw Error(
-                            "Enable HumanCLI before sending an instruction.",
-                          );
-                        await api("/agent", {
-                          text: chat,
-                          epoch: heldEpoch.current,
-                          space_id: selected || null,
-                        });
-                        setChat("");
-                      });
-                    }}
-                  >
-                    <input
-                      aria-label="HumanCLI instruction"
-                      value={chat}
-                      onChange={(e) => setChat(e.target.value)}
-                      placeholder="Go to the far end…"
+                    <p>
+                      DimOS agent ·{" "}
+                      {state.agent.model?.configured
+                        ? `${state.agent.model.provider} / ${state.agent.model.model}`
+                        : "Configure a model below to begin."}{" "}
+                      Movement stays within mapped clear space. Camera access is
+                      optional.
+                    </p>
+                    <HumanCLISettings
+                      config={state.agent.model}
+                      pending={!!pending || state.agent.busy || voice.active}
+                      save={async (value) => {
+                        setPending("agent-config");
+                        try {
+                          await api("/agent/config", value);
+                          await refresh();
+                        } finally {
+                          setPending("");
+                        }
+                      }}
                     />
+                    {state.agent.busy && (
+                      <div className="agent-progress" role="status">
+                        <span>HumanCLI is working…</span>
+                        <button
+                          onClick={() =>
+                            action("agent-cancel", () => api("/agent/cancel"))
+                          }
+                        >
+                          Cancel response
+                        </button>
+                      </div>
+                    )}
+                    <div
+                      className="messages"
+                      ref={chatLog}
+                      role="log"
+                      aria-label="HumanCLI conversation"
+                    >
+                      {!state.agent.messages.filter(
+                        (m) => Date.now() / 1000 - m.ts < 1800,
+                      ).length ? (
+                        <span className="muted">
+                          Try “walk one meter backward” or “what do you see?”.
+                        </span>
+                      ) : (
+                        state.agent.messages
+                          .filter((m) => Date.now() / 1000 - m.ts < 1800)
+                          .slice(-10)
+                          .map((m, i) => (
+                            <div key={i} className={"message " + m.role}>
+                              <small>
+                                {m.role === "user"
+                                  ? "YOU"
+                                  : m.role === "tool"
+                                    ? "TOOL"
+                                    : "HUMANCLI"}
+                              </small>
+                              {m.text}
+                            </div>
+                          ))
+                      )}
+                    </div>
+                    {available(state, "voice") && (
+                      <div className="voice-control">
+                        <button
+                          className={voice.phase === "recording" ? "armed" : ""}
+                          aria-label="Hold to talk to HumanCLI"
+                          disabled={
+                            !connected ||
+                            !!pending ||
+                            voice.phase === "transcribing"
+                          }
+                          onPointerDown={(event) => {
+                            if (event.button !== 0) return;
+                            event.currentTarget.setPointerCapture(
+                              event.pointerId,
+                            );
+                            void voice.capture.start();
+                          }}
+                          onPointerUp={() => voice.capture.finish()}
+                          onPointerCancel={() => voice.capture.cancel()}
+                          onKeyDown={(event) => {
+                            if ([" ", "Enter"].includes(event.key)) {
+                              event.preventDefault();
+                              if (!event.repeat) void voice.capture.start();
+                            }
+                          }}
+                          onKeyUp={(event) => {
+                            if ([" ", "Enter"].includes(event.key)) {
+                              event.preventDefault();
+                              voice.capture.finish();
+                            }
+                          }}
+                        >
+                          <Mic size={16} />{" "}
+                          {voice.phase === "recording"
+                            ? "Listening…"
+                            : "Hold to talk · R1"}
+                        </button>
+                        {voice.active && (
+                          <button onClick={() => voice.capture.cancel()}>
+                            Cancel voice
+                          </button>
+                        )}
+                        {!voice.active && <p role="status">{voice.message}</p>}
+                        <small>
+                          Microphone audio goes to OpenAI. Release to send to
+                          HumanCLI.
+                        </small>
+                      </div>
+                    )}
+                    <form
+                      onSubmit={(e) => {
+                        e.preventDefault();
+                        voice.capture.cancel();
+                        void action("agent", async () => {
+                          if (
+                            stateRef.current?.mode !== "agent" ||
+                            heldEpoch.current === null
+                          )
+                            throw Error(
+                              "Enable HumanCLI before sending an instruction.",
+                            );
+                          await api("/agent", {
+                            text: chat,
+                            epoch: heldEpoch.current,
+                            space_id: selected || null,
+                          });
+                          setChat("");
+                        });
+                      }}
+                    >
+                      <input
+                        aria-label="HumanCLI instruction"
+                        value={chat}
+                        onChange={(e) => setChat(e.target.value)}
+                        placeholder={
+                          state.robot_kind === "vector"
+                            ? "Move 30 centimeters forward…"
+                            : "Go to the far end…"
+                        }
+                      />
+                      <button
+                        aria-label="Send instruction"
+                        disabled={
+                          !chat.trim() ||
+                          !!pending ||
+                          state.mode !== "agent" ||
+                          state.agent.busy ||
+                          state.agent.model?.configured === false
+                        }
+                      >
+                        <Send size={16} />
+                      </button>
+                    </form>
+                  </div>
+                ) : (
+                  <div className="mode-info">
+                    <Radio size={28} />
+                    <h3>Ready to take control</h3>
+                    <p>Choose an enabled control mode above.</p>
+                  </div>
+                )}
+                {state.telemetry.control?.estop && (
+                  <button
+                    className="clear-stop"
+                    onClick={() => action("clear", () => api("/clear"))}
+                  >
+                    Release stop to select a mode
+                  </button>
+                )}
+                {state.robot_kind === "vector" ? (
+                  <div className="vector-personality">
+                    <strong>
+                      {state.telemetry.control?.ownership === "native"
+                        ? "Native personality active"
+                        : state.telemetry.control?.ownership === "stopped"
+                          ? "Stopped"
+                          : state.telemetry.control?.ownership === "app"
+                            ? "App has control"
+                            : "Waiting for ownership status"}
+                    </strong>
+                    <p role="status" aria-label="Local Vector services">
+                      <strong>
+                        Vector services:{" "}
+                        {state.vector_services?.state || "stopped"}
+                      </strong>
+                      <br />
+                      {state.vector_services?.message ||
+                        "Starts automatically when you connect to Vector."}
+                    </p>
+                    <small>
+                      HumanCLI yields to native personality between actions, so
+                      Vector can hear its wake word. Native behavior can move
+                      it. Teleop holds control until you pause and resume
+                      personality.
+                    </small>
+                    {state.telemetry.control?.action && (
+                      <p role="status">
+                        {state.telemetry.control.action.name}:{" "}
+                        {state.telemetry.control.action.status}
+                        {state.telemetry.control.action.error
+                          ? ` · ${state.telemetry.control.action.error}`
+                          : ""}
+                        {state.telemetry.control.action.result?.message
+                          ? ` · ${state.telemetry.control.action.result.message}`
+                          : ""}
+                        {state.telemetry.control.action.result?.found === true
+                          ? " · Person found"
+                          : ""}
+                      </p>
+                    )}
                     <button
-                      aria-label="Send instruction"
                       disabled={
-                        !chat.trim() ||
+                        !connected ||
                         !!pending ||
-                        state.mode !== "agent" ||
-                        state.agent.busy ||
-                        state.agent.model?.configured === false
+                        state.mode !== "idle" ||
+                        !!state.telemetry.control?.estop
+                      }
+                      onClick={() =>
+                        action("personality", () => api("/vector/personality"))
                       }
                     >
-                      <Send size={16} />
+                      Resume native personality
                     </button>
-                  </form>
-                </div>
-              ) : (
-                <div className="mode-info">
-                  <Radio size={28} />
-                  <h3>Ready to take control</h3>
-                  <p>
-                    Connect Go2 and choose how to explore. Recording works in
-                    every control mode.
-                  </p>
-                </div>
-              )}
-              {state.telemetry.control?.estop && (
-                <button
-                  className="clear-stop"
-                  onClick={() => action("clear", () => api("/clear"))}
-                >
-                  Release stop to select a mode
-                </button>
-              )}
-              <div className="posture">
-                <button
-                  disabled={!connected || !!pending}
-                  onClick={() => void posture("stand")}
-                >
-                  Stand up
-                </button>
-                <button
-                  disabled={!connected || !!pending}
-                  onClick={() => void posture("lie")}
-                >
-                  Lie down
-                </button>
-              </div>
-            </section>
-          </aside>
-        </div>
+                  </div>
+                ) : (
+                  <div className="posture">
+                    <button
+                      disabled={!connected || !!pending}
+                      onClick={() => void posture("stand")}
+                    >
+                      Stand up
+                    </button>
+                    <button
+                      disabled={!connected || !!pending}
+                      onClick={() => void posture("lie")}
+                    >
+                      Lie down
+                    </button>
+                  </div>
+                )}
+              </section>
+            </aside>
+          </div>
+        )}
         <section
           className={
             "record-bar panel " + (state.session ? "is-recording" : "")
@@ -942,9 +1393,18 @@ export function App() {
               <span>
                 {state.session
                   ? state.segment
-                    ? "LiDAR + camera + odometry + TF"
+                    ? [
+                        available(state, "lidar") && "LiDAR",
+                        available(state, "camera") && "camera",
+                        "odometry",
+                        "TF",
+                      ]
+                        .filter(Boolean)
+                        .join(" + ")
                     : "Waiting to reconnect and start another segment"
-                  : "One session, every control mode"}
+                  : available(state, "recording")
+                    ? "Record enabled sensor streams in any control mode"
+                    : "Recording disabled in Session setup"}
               </span>
             </div>
           </div>
@@ -977,7 +1437,9 @@ export function App() {
           <button
             className={state.session ? "record-stop" : "primary"}
             disabled={
-              !!pending || (!state.session && (!connected || !selected))
+              !!pending ||
+              (!state.session &&
+                (!connected || !selected || !available(state, "recording")))
             }
             onClick={() =>
               action("record", () =>
@@ -1339,44 +1801,24 @@ export function App() {
             className="dialog"
             role="dialog"
             aria-modal="true"
-            aria-label="Disconnect Go2"
+            aria-label="Disconnect robot"
           >
-            <h2>Lie down before disconnecting</h2>
-            <p>
-              Wait until Go2 lies down and visually confirm it is supported. A
-              sent command does not confirm posture.
-            </p>
+            <h2>Disconnect {state.robot_kind === "vector" ? "Vector" : "Go2"}</h2>
+            <p>Movement must be paused. Any active recording will be saved before closing the connection.</p>
             <button
-              disabled={!!pending || !connected}
-              onClick={() => void action("lie", () => api("/posture/lie"))}
-            >
-              1. Lie down Go2
-            </button>
-            {!connected && (
-              <p>
-                No connection is available to request posture. Check the robot
-                in person before closing the session.
-              </p>
-            )}
-            <label>
-              <input
-                type="checkbox"
-                checked={parked}
-                onChange={(e) => setParked(e.target.checked)}
-              />{" "}
-              I confirm Go2 is lying down and supported
-            </label>
-            <button
-              disabled={!parked || !!pending || state.mode !== "idle"}
+              disabled={
+                !!pending ||
+                state.mode !== "idle"
+              }
               onClick={() =>
                 void action("disconnect", async () => {
-                  await api("/disconnect", { parked_confirmed: true });
+                  if (state.session) await api("/record/stop");
+                  await api("/disconnect");
                   setDisconnectDialog(false);
-                  setParked(false);
                 })
               }
             >
-              2. Close connection
+              Close connection
             </button>
             <button onClick={() => setDisconnectDialog(false)}>
               Back to dashboard

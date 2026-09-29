@@ -54,4 +54,4 @@ Validation: 100 backend tests and 14 frontend tests pass; Ruff and the productio
 
 Tests exercise the actual DimOS MCP client and LangGraph loop with a deterministic model in an isolated subprocess: tool dispatch, image follow-up, cancellation and provider-error redaction. Additional tests cover credentials, typed arguments, stale authority, the recording/exploration/map workflow and the navigation gate. No live provider request or physical robot motion is used in those tests.
 
-This update remains prepared separately from the running physical dashboard. Follow AGENTS.md and obtain current operator posture confirmation before activating it. Hardware behavior and the selected provider/model should be checked after activation with the operator present.
+This update remains prepared separately from the running physical dashboard. Follow the stop, save and disconnect sequence in AGENTS.md before activating it. Hardware behavior and the selected provider/model should be checked after activation with the operator present.

@@ -169,7 +169,7 @@ class CloudBackups:
             if self.login_worker and self.login_worker.is_alive():
                 return self.status()
             d = self.request(
-                "POST", "/auth/device", auth=False, params={"label": "Go2 Space Setup"}
+                "POST", "/auth/device", auth=False, params={"label": "DIMENSIONAL"}
             )
             url = d.get("verification_uri_complete", d["verification_uri"])
             parsed = urlparse(url)

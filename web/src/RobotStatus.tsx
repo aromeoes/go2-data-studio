@@ -15,13 +15,17 @@ export function BatteryStatus({
     ? Date.now() / 1000 - battery.received
     : Infinity;
   const fresh = connected && age >= 0 && age < 10;
-  const text = !valid
-    ? "Battery unavailable"
-    : `${percent}%${state.replay ? " · replay" : !fresh ? " · stale" : ""}`;
+  const power = state.telemetry.vector?.power;
+  const text =
+    state.robot_kind === "vector" && power
+      ? `${power.volts.toFixed(2)} V · ${power.level}${fresh ? "" : " · stale"}`
+      : !valid
+        ? "Battery unavailable"
+        : `${percent}%${state.replay ? " · replay" : !fresh ? " · stale" : ""}`;
   return (
     <span
       className={`battery-status ${valid && fresh && percent <= 20 ? "low" : ""}`}
-      title={fresh ? "Charge reported by Go2" : "No recent battery reading"}
+      title={fresh ? "Charge reported by robot" : "No recent battery reading"}
       aria-label={`Battery: ${text}`}
     >
       <BatteryMedium size={16} aria-hidden="true" />

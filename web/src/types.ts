@@ -49,6 +49,11 @@ export type Grid = {
   received: number;
 };
 export type State = {
+  vector_services?: { state: string; message: string; host?: string | null; voice_ready?: boolean };
+  robot_id?: string | null;
+  robot_kind?: "go2" | "vector";
+  profile?: import("./SessionSetup").SessionProfile;
+  modules?: string[];
   cloud?: {
     configured: boolean;
     account: { email: string; id: string } | null;
@@ -76,6 +81,7 @@ export type State = {
   maps: Item[];
   events: { id: number; ts: number; message: string }[];
   telemetry: {
+    vector?: import("./VectorSensors").VectorReadings;
     battery?: { percent: number | null; received: number | null };
     navigation?: NavigationInfo;
     map?: Grid;
@@ -85,6 +91,13 @@ export type State = {
     recording?: { dropped: number; errors: number };
     control?: {
       estop: boolean;
+      ownership?: string;
+      action?: {
+        name: string;
+        status: string;
+        error?: string;
+        result?: { found?: boolean; message?: string };
+      };
       stop_reason?: string;
       nav_received?: number;
       nav_forwarded?: number;

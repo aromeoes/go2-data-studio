@@ -31,9 +31,8 @@ The desktop's optional `robot.env` is located alongside `spaces`. Optional
 the app is closed. API keys and robot credentials are never included in the DMG.
 No runtime path is needed or saved for a packaged Mac application.
 
-Application quit follows the guarded disconnect workflow. Save recordings,
-request lie-down with the operator present, visually confirm support, and use
-Disconnect before quitting. Closing the window does not bypass that guard.
+Application quit follows the disconnect workflow. Stop movement, save recordings
+and use Disconnect before quitting. Closing the window does not bypass that guard.
 
 ## Build the embedded runtime
 
@@ -44,6 +43,7 @@ the development framework checkout is never copied or modified. The resulting
 runtime is relocatable and has no editable-install links.
 
 ```sh
+uv pip install --python "$DIMOS_RUNTIME/.venv/bin/python" -e ".[vector]"
 mkdir -p /tmp/go2-runtime-inputs
 curl -fL https://api.github.com/repos/dimensionalOS/dimos/tarball/c1c3cdc9d2ee54ca72259465688395699d7d99a2 -o /tmp/go2-runtime-inputs/dimos.tar.gz
 curl -fL https://github.com/denoland/deno/releases/download/v2.9.6/deno-aarch64-apple-darwin.zip -o /tmp/go2-runtime-inputs/deno.zip
@@ -96,3 +96,5 @@ are git-ignored.
 
 Physical motion, sensors and prolonged recording require a separate supervised
 hardware check. These packaging tests did not connect to or move a robot.
+
+Build the bundled Vector voice service before packaging: `python3 desktop/build-wirepod.py`. See [Vector services](VECTOR.md) for the pinned build dependencies and runtime lifecycle.

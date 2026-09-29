@@ -27,3 +27,12 @@ Go2Spaces/
 desktop/node_modules/
 desktop/dist/
 desktop/runtime/
+
+# Saved local robot identities and session preferences
+robots.json
+
+# Private local Vector service state
+/wirepod/
+vector-wirepod-token
+wirepod-ssh.json
+wirepod-tunnel-status.json

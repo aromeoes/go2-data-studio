@@ -8,4 +8,4 @@ Deletion is refused while the segment is recording, importing, uploading, replay
 
 Files are moved atomically into a unique `.deleting` folder before catalog removal; database failures restore moved files. Disk cleanup runs outside robot control locks. If cleanup fails, the UI reports the residual folder so its disk space can be reclaimed. The operation never sends a robot command or a cloud delete request.
 
-Validation: 90 backend tests, 13 frontend tests, production build and Ruff pass. Dialog layout and space renaming were checked in an isolated browser preview. Physical server activation remains separate and requires the posture confirmation in AGENTS.md.
+Validation: 90 backend tests, 13 frontend tests, production build and Ruff pass. Dialog layout and space renaming were checked in an isolated browser preview. Physical server activation remains separate and follows the stop, save and disconnect sequence in AGENTS.md.

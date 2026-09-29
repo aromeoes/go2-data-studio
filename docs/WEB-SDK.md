@@ -55,4 +55,4 @@ Build with `npm ci`, `npm run build` and `npm test` inside `web/`. Deno must be 
 
 Use `GO2_REPLAY_ONLY=1` and a separate `GO2_SPACES` directory for replay testing. This flag blocks physical robot launches even if a connection is requested accidentally.
 
-The physical application must only be restarted after following AGENTS.md: stop motion, have the operator confirm Go2 is lying down and supported (or confirm it is powered off), save any recording, and use guarded disconnect. Until that confirmation, keep the candidate isolated from the application on port 8780. Do not copy changed runtime files into its working directory while its supervisor may reconnect.
+Before restarting the physical application, follow AGENTS.md: stop motion, save any recording and use Disconnect. Keep candidate runtime files isolated until the active session is closed.

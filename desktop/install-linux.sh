@@ -12,7 +12,7 @@ chmod +x "$target_dir/launch.sh"
 cat > "$HOME/.local/share/applications/go2-data-studio.desktop" <<EOF
 [Desktop Entry]
 Type=Application
-Name=Go2 Data Studio
+Name=DIMENSIONAL
 Comment=Map, record and explore with a Unitree Go2
 Exec="$target_dir/launch.sh"
 Icon=$target_dir/icon.png
@@ -21,4 +21,4 @@ Categories=Utility;
 StartupWMClass=go2-data-studio
 EOF
 command -v update-desktop-database >/dev/null && update-desktop-database "$HOME/.local/share/applications" || true
-printf 'Installed: %s\nOpen Go2 Data Studio from the applications menu.\n' "$target_dir"
+printf 'Installed: %s\nOpen DIMENSIONAL from the applications menu.\n' "$target_dir"

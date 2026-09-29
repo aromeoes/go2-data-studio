@@ -24,7 +24,8 @@ def test_nav_and_strafe_pass_the_gate_but_expired_commands_do_not(monkeypatch):
     monkeypatch.setattr("go2_setup.modules.Module.__init__", lambda self, **kwargs: None)
     gate = ControlGate()
     gate.cmd_vel = Mock()
-    gate.last_odom = time.monotonic()
+    gate.teleop_requested = Mock()
+    gate.last_odom = gate.last_lidar = gate.last_map = time.monotonic()
     token = gate.switch("teleop")
     assert gate.teleop(token, 0, 0.2, 0)
     assert gate.cmd_vel.publish.call_args.args[0].linear.y == 0.2
@@ -163,7 +164,8 @@ def test_forward_speed_is_not_clipped_in_teleop_or_navigation(monkeypatch, speed
     monkeypatch.setattr("go2_setup.modules.Module.__init__", lambda self, **kwargs: None)
     gate = ControlGate()
     gate.cmd_vel = Mock()
-    gate.last_odom = time.monotonic()
+    gate.teleop_requested = Mock()
+    gate.last_odom = gate.last_lidar = gate.last_map = time.monotonic()
     epoch = gate.switch("teleop")
     assert gate.teleop(epoch, speed, 0, 0)
     assert gate.cmd_vel.publish.call_args.args[0].linear.x == speed

@@ -89,8 +89,12 @@ def test_sdk_twists_obey_mode_stop_latch_and_position_freshness():
     from dimos.msgs.geometry_msgs.Twist import Twist
 
     gate = object.__new__(ControlGate)
+    from go2_setup.profiles import profile
+
+    gate.profile = profile("legacy")
     gate.authority = Authority()
     gate.cmd_vel = Mock()
+    gate.teleop_requested = Mock()
     gate.last_odom = time.monotonic()
     gate.last_teleop = 0
     gate._sdk_teleop(Twist((0.5, 0, 0)))
@@ -106,7 +110,7 @@ def test_sdk_twists_obey_mode_stop_latch_and_position_freshness():
     gate.cmd_vel.publish.assert_not_called()
     gate.authority.clear()
     gate.authority.transition("teleop")
-    gate.last_odom -= 5
+    gate.last_odom -= 11
     gate._sdk_teleop(Twist((0.5, 0, 0)))
     gate.cmd_vel.publish.assert_not_called()
 
@@ -131,3 +135,16 @@ def test_sdk_stop_has_an_independent_queue_and_commands_are_not_retried():
     assert bridge.urgent.get_nowait()["path"] == "/stop"
     bridge._command(json.dumps({"id": "overflow", "path": "/mode"}))
     assert "busy" in bridge.results["overflow"]["error"]
+
+
+def test_vector_teleop_manifest_matches_differential_drive_limits():
+    from go2_setup.vector.runtime import build_blueprint
+    from go2_setup.profiles import profile
+
+    bp = build_blueprint(profile('drive', kind='vector'))
+    manifests = [b.kwargs['manifest'] for b in bp.blueprints if 'manifest' in b.kwargs]
+    assert len(manifests) == 1
+    teleop = next(ch for ch in manifests[0]['channels'] if ch['ch'] == 'tele_cmd_vel')
+    assert teleop['params']['maxLinear'] == 0.12
+    assert teleop['params']['maxAngular'] == 1.5
+    assert teleop['params']['watchdogMs'] == 300

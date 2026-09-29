@@ -15,6 +15,17 @@ function pad(axes = [0, 0, 0, 0], held = false): Gamepad {
   } as unknown as Gamepad;
 }
 describe("controller authority and analog input", () => {
+  it("steers Vector with the left stick, keeping right-stick turning as an alias", () => {
+    const gate = new GamepadGate();
+    gate.sample(pad(), 0.1, "vector");
+    expect(gate.sample(pad([-1, -1, 1], true), 0.1, "vector"))
+      .toEqual({ vx: 0.1, vy: 0, wz: 1.5 });
+    expect(gate.sample(pad([1, 0, 0], true), 0.1, "vector")?.wz).toBe(-1.5);
+    expect(gate.sample(pad([0, 0, -1], true), 0.1, "vector")?.wz).toBe(1.5);
+    expect(gate.sample(pad([0, -0.59, 0], true), 0.1, "vector")?.vx).toBeCloseTo(0.05);
+    expect(gate.sample(pad([0.1, -0.1, 0.1], true), 0.1, "vector")).toEqual(ZERO);
+    expect(gate.sample(pad([-1, -1, 0], false), 0.1, "vector")).toEqual(ZERO);
+  });
   it("requires centered sticks and a released bumper before movement", () => {
     const gate = new GamepadGate();
     expect(gate.sample(pad([0, -1, 0], true), 0.5)).toEqual(ZERO);

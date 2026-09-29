@@ -158,10 +158,10 @@ class ConsoleSDK(Module):
         super().stop()
 
 
-def sdk_blueprint():
+def sdk_blueprint(*, max_linear=1.0, max_angular=0.5):
     # Channel-only manifest: no Cockpit panels, layout or UI dependency.
     blueprint = cockpit(
-        Teleop(max_linear=1.0, max_angular=0.5, boost=1.0),
+        Teleop(max_linear=max_linear, max_angular=max_angular, boost=1.0),
         channels=[
             Channel("color_image", Image, encoding="jpeg.v1", delivery="latest", max_hz=10),
             Channel("odom", PoseStamped, encoding="pose.json.v1", max_hz=15),

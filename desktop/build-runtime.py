@@ -43,6 +43,14 @@ def assemble(args):
     }.get((platform.system(), platform.machine()))
     if platform_target is None:
         raise SystemExit("Supported runtime targets: macOS Apple Silicon and Linux x86_64.")
+    # Fail before copying a multi-GB runtime if the optional embodiment is missing.
+    try:
+        vector_version = importlib.metadata.version("wirepod-vector-sdk")
+    except importlib.metadata.PackageNotFoundError:
+        raise SystemExit("Install the app vector extra in the dependency environment before building.")
+    if vector_version != "0.8.1":
+        raise SystemExit("The validated Vector SDK version is 0.8.1.")
+    import anki_vector  # noqa: F401 Verify transitive dependencies before packaging.
     root = args.output.resolve()
     if root.exists():
         raise SystemExit(f"Output already exists: {root}. Choose a fresh directory.")

@@ -39,18 +39,22 @@ def install(application: Path, steam: Path):
     shortcuts = profile / "shortcuts.vdf"
     data = vdf.binary_load(shortcuts.open("rb")) if shortcuts.exists() else {"shortcuts": {}}
     records = data.setdefault("shortcuts", {})
-    name = "Go2 Data Studio"
+    name = "DIMENSIONAL"
     exe = f'"{executable}"'
     appid = zlib.crc32((exe + name).encode()) | 0x80000000
     index = next(
         (
             key
             for key, value in records.items()
-            if value.get("appname", value.get("AppName")) == name
+            if value.get("appname", value.get("AppName")) in {name, "Go2 Data Studio", "Go2 Studio"}
+            and value.get("exe", value.get("Exe")) == exe
         ),
         str(max([int(key) for key in records] + [-1]) + 1),
     )
     record = dict(records.get(index, {}))
+    # Preserve Steam Input profiles, artwork ownership and launch URLs on rename.
+    if "appid" in record:
+        appid = int(record["appid"]) & 0xFFFFFFFF
     record.update(
         {
             "appid": appid - 0x100000000,
@@ -85,8 +89,14 @@ def install(application: Path, steam: Path):
         (f"{appid}.png", "grid"),
         (f"{appid}p.png", "cover"),
         (f"{appid}_hero.png", "hero"),
+        (f"{appid}_logo.png", "logo"),
     ):
-        shutil.copy2(application / "artwork" / f"{source}.png", grid / filename)
+        destination = grid / filename
+        if destination.exists():
+            backup = application / "artwork-backups" / str(time.time_ns())
+            backup.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(destination, backup / filename)
+        shutil.copy2(application / "artwork" / f"{source}.png", destination)
     gameid = (appid << 32) | 0x02000000
     print(f"Steam library entry installed. App ID: {appid}; launch: steam://rungameid/{gameid}")
     (application / "steam-game-id").write_text(str(gameid) + "\n")

@@ -36,17 +36,19 @@ browser has not exposed the controller yet. Touch and trackpad remain available.
 | Steam + X | Open Steam's keyboard for text entry |
 | Left stick, while armed | Forward/backward and sideways translation |
 | Right stick horizontal, while armed | Turn |
-| LB held | Hold to drive; release requests zero motion |
+| L1 / LB held | Take Teleop control from any mode; release stops and relinquishes the app lease |
 | B | Request software stop |
 
-Enable controls explicitly and release/center the controls before driving. Focus
-loss, stale samples and suspend/resume disarm movement. These are software
+With controller input selected, center the sticks and hold L1 to take Teleop
+control. No Enable controls click is needed. A fresh L1 press clears a software
+Stop latch before requesting Teleop; physical sensor checks still apply. Release
+L1 to stop. Focus loss, stale samples and suspend/resume cancel the request and
+require a new press after releasing L1. These are software
 controls, not an electrical emergency stop. Physical buttons, joystick response, text entry and sustained robot recording
 still need operator testing on this Deck.
 The implementation and replay checks do not establish physical safety or performance.
 
-Save recording and use the guarded disconnect flow before quitting. For a physical
-session, an operator must request lie-down and visually confirm support first.
+Stop movement, save recording and use Disconnect before quitting.
 The app guards normal quit and termination requests. Steam's force-stop, forced
 sleep, power loss and SIGKILL cannot be intercepted reliably.
 

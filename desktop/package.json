@@ -2,7 +2,7 @@
   "name": "go2-data-studio-desktop",
   "version": "0.3.0",
   "private": true,
-  "description": "Standalone Go2 Data Studio desktop host",
+  "description": "DIMENSIONAL desktop robot workspace",
   "main": "main.cjs",
   "scripts": {
     "start": "electron .",
@@ -17,11 +17,12 @@
   },
   "build": {
     "appId": "com.go2datastudio.desktop",
-    "productName": "Go2 Data Studio",
+    "productName": "DIMENSIONAL",
     "files": [
       "main.cjs",
       "backend.cjs",
-      "package.json"
+      "package.json",
+      "permissions.cjs"
     ],
     "extraResources": [
       {
@@ -55,7 +56,8 @@
         }
       ],
       "extendInfo": {
-        "NSLocalNetworkUsageDescription": "Go2 Data Studio connects to your Go2 on the local Wi-Fi network to show sensors, control movement and record maps."
+        "NSLocalNetworkUsageDescription": "DIMENSIONAL connects to your Go2 or Anki Vector on the local Wi-Fi network to show sensors, control movement and record maps.",
+        "NSMicrophoneUsageDescription": "Hold the talk button to send your spoken instruction to HumanCLI using OpenAI transcription."
       }
     },
     "linux": {
@@ -73,8 +75,8 @@
       ]
     },
     "dmg": {
-      "title": "Go2 Data Studio",
-      "artifactName": "Go2-Data-Studio-${version}-${arch}.${ext}"
+      "title": "DIMENSIONAL",
+      "artifactName": "DIMENSIONAL-${version}-${arch}.${ext}"
     },
     "beforePack": "verify-package.cjs"
   }

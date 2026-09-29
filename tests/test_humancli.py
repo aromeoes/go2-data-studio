@@ -272,8 +272,11 @@ def test_navigation_pause_blocks_late_velocity_without_revoking_chat(monkeypatch
     monkeypatch.setattr("go2_setup.modules.Module.__init__", lambda self, **kwargs: None)
     gate = ControlGate()
     gate.cmd_vel = Mock()
+    gate.teleop_requested = Mock()
     gate.last_odom = time.monotonic()
     epoch = gate.switch("agent")
+    gate.last_lidar = gate.last_map = time.monotonic()
+    assert gate.navigation(epoch, True)
     gate._nav(Twist((0.1, 0, 0), (0, 0, 0)))
     assert gate.nav_forwarded == 1
     assert gate.navigation(epoch, False)

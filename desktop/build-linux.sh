@@ -35,8 +35,10 @@ cp /usr/share/licenses/libjpeg-turbo/README.ijg desktop/runtime/licenses/libjpeg
 curl -fL https://raw.githubusercontent.com/denoland/deno/v2.9.6/LICENSE.md -o desktop/runtime/DENO-LICENSE.md
 DENO_DIR="$PWD/desktop/runtime/deno-cache" desktop/runtime/bin/deno cache \
   --frozen --node-modules-dir=none --config vendor/dimos-web/deno.json vendor/dimos-web/relay/main.ts
+python3 desktop/build-wirepod.py
 (cd web && npm ci && npm test && npm run build)
 (cd desktop && npm ci && npm test && npm run package:linux)
+cp desktop/enable-vector-network.sh desktop/dist/linux-unpacked/enable-vector-network.sh
 cp desktop/launch-linux.sh desktop/dist/linux-unpacked/launch.sh
 chmod +x desktop/dist/linux-unpacked/launch.sh
 cp desktop/assets/icon.png desktop/dist/linux-unpacked/icon.png
