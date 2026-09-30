@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite --host 127.0.0.1",
+    "mock": "vite --host 127.0.0.1 --port 8797 --open /mock.html",
     "build": "tsc -b && vite build",
     "test": "vitest run src"
   },

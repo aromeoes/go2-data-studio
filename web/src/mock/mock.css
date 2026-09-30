@@ -1,0 +1,114 @@
+/* Mock mode controls. Deliberately unlike the product so it never reads as app UI. */
+.mock-panel {
+  position: fixed;
+  right: 12px;
+  bottom: 12px;
+  z-index: 900;
+  width: 270px;
+  max-height: calc(100vh - 24px);
+  display: flex;
+  flex-direction: column;
+  font: 12px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace;
+  color: #f4e6c8;
+  background: #211b10f2;
+  border: 1px dashed #e0a93a;
+  border-radius: 8px;
+  box-shadow: 0 8px 28px #0009;
+}
+.mock-panel,
+.mock-panel * {
+  box-sizing: border-box;
+}
+.mock-panel button,
+.mock-panel select,
+.mock-panel input {
+  font: inherit;
+  color: inherit;
+}
+.mock-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 8px 10px;
+  border: 0;
+  background: none;
+  cursor: pointer;
+  text-align: left;
+}
+.mock-head strong {
+  color: #e0a93a;
+  letter-spacing: 0.08em;
+}
+.mock-head span:nth-of-type(1) {
+  flex: 1;
+  opacity: 0.75;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.mock-body {
+  overflow-y: auto;
+  padding: 0 10px 10px;
+  display: grid;
+  gap: 7px;
+}
+.mock-body p {
+  margin: 0;
+  opacity: 0.7;
+}
+.mock-body h3 {
+  margin: 6px 0 0;
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #e0a93a;
+}
+.mock-body label {
+  display: grid;
+  gap: 3px;
+}
+.mock-body label.mock-check {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.mock-body > *,
+.mock-row > * {
+  min-width: 0;
+}
+.mock-body select,
+.mock-body input[type="range"] {
+  width: 100%;
+}
+.mock-body select,
+.mock-body button {
+  padding: 5px 7px;
+  background: #342a17;
+  border: 1px solid #5d4a22;
+  border-radius: 5px;
+}
+.mock-body button {
+  cursor: pointer;
+  white-space: normal;
+  line-height: 1.25;
+}
+.mock-body button:hover:not(:disabled) {
+  border-color: #e0a93a;
+}
+.mock-body button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+.mock-body button[aria-pressed="true"] {
+  background: #e0a93a;
+  color: #211b10;
+}
+.mock-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+}
+.mock-attention button {
+  border-color: #e0a93a;
+}
