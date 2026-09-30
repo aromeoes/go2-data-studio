@@ -94,6 +94,10 @@ class RecordBody(BaseModel):
     space_id: str
 
 
+class LocalizationBody(BaseModel):
+    map_id: str | None = None
+
+
 class MapBody(BaseModel):
     segment_id: str
     voxel: float = 0.1
@@ -367,6 +371,19 @@ def create_app(settings: Settings | None = None):
     @app.get("/api/robots/availability")
     def robot_availability():
         return supervisor.robots.availability()
+
+    @app.post("/api/localization/confirm")
+    def confirm_localization():
+        with supervisor.lock:
+            if supervisor.connection != "online" or supervisor.mode != "idle":
+                raise ValueError("Connect and pause movement before confirming localization")
+            return supervisor.call("/localization/confirm")
+
+    @app.post("/api/localization")
+    def localization(body: LocalizationBody):
+        result = supervisor.select_map(body.map_id)
+        agent.new_conversation()
+        return result
 
     @app.post("/api/session/profile")
     def session_profile(body: ProfileBody):

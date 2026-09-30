@@ -12,7 +12,7 @@ it("shows asynchronous skill errors and explains stale named places", async () =
   const root = createRoot(container);
   await act(async () => root.render(<RobotSkillStatus state={{ active: null, phase: "error", message: "No clear destination", places: [{ name: "Reception", usable: false }] }} />));
   expect(container.querySelector('[role="status"]')?.textContent).toContain("No clear destination");
-  expect(container.textContent).toContain("Reception: tag again after reconnect");
+  expect(container.textContent).toContain("Reception: requires matching map or a new tag");
   expect(container.textContent).toContain("Stop patrol");
   await act(async () => root.unmount());
   container.remove();

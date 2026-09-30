@@ -1,3 +1,4 @@
+import { LocalizationPanel } from "./LocalizationPanel";
 import React, { useEffect, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import {
@@ -856,6 +857,14 @@ export function App() {
                         : "No data yet"}
                     </span>
                   </div>
+                  {state.robot_kind !== "vector" && <LocalizationPanel
+                    maps={maps} selected={state.localization_map_id}
+                    state={state.telemetry.localization} connection={state.connection}
+                    disabled={!!pending || state.mode !== "idle" || !!state.session ||
+                      !["online", "offline"].includes(state.connection)}
+                    onConfirm={() => action("Confirm localization", () => api("/localization/confirm"))}
+                    onSelect={map_id => action("Select reference map", () => api("/localization", {map_id}))}
+                  />}
                   <MapCanvas
                     grid={state.telemetry.map}
                     pose={state.telemetry.pose}
@@ -865,7 +874,7 @@ export function App() {
                     <span>
                       <i className={connected ? "live-dot" : "offline-dot"} />
                       {state.telemetry.map
-                        ? "Preview map · updated by LiDAR"
+                        ? ["localized", "candidate"].includes(state.telemetry.localization?.status || "") ? "Reference map + live LiDAR" : "Preview map · updated by LiDAR"
                         : "Waiting for sensors"}
                     </span>
                     <span className="mono">
@@ -1723,6 +1732,10 @@ export function App() {
                       {m.status === "ready" ? (
                         <>
                           <button onClick={() => setQuality(m)}>Quality</button>
+                          <button disabled={!!pending || state.mode !== "idle" || !!state.session || !["online", "offline"].includes(state.connection)}
+                            onClick={() => action("Select reference map", () => api("/localization", {map_id: m.id}))}>
+                            {state.localization_map_id === m.id ? "Retry localization" : "Use for localization"}
+                          </button>
                           <button
                             className="primary"
                             disabled={!m.rerun_path}

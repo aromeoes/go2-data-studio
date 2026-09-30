@@ -2494,3 +2494,9 @@ dialog.upload-dialog::backdrop {
 .robot-skill-status summary { cursor: pointer; }
 .robot-skill-status ul, .robot-skill-status ol { padding-left: 20px; }
 .robot-skill-status li { margin: 6px 0; }
+
+.localization-panel { padding: 10px 14px; border-bottom: 1px solid var(--border, #333); display: grid; gap: 5px; font-size: 12px; }
+.localization-controls { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.localization-controls select { flex: 1; min-width: 120px; max-width: 100%; }
+.localization-panel [role="status"] { display: flex; gap: 8px; flex-wrap: wrap; }
+.localization-panel small { opacity: .75; }

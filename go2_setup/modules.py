@@ -1,6 +1,8 @@
 """External DimOS modules. The upstream checkout stays unchanged."""
 
 import base64
+import json
+import os
 import copy
 import queue
 import threading
@@ -223,6 +225,21 @@ class ControlGate(Module):
         self.nav_forwarded = 0
         self.last_nav = None
         self.stop_reason = None
+        self.localization_required = bool(json.loads(os.environ.get("GO2_LOCALIZATION", "null")))
+        self.localization_ok_at = 0.0
+
+    def localized(self):
+        return not self.localization_required or time.monotonic() - self.localization_ok_at < 3
+
+    @rpc
+    def localization_state(self, ready: bool):
+        with self.authority.lock:
+            self.localization_ok_at = time.monotonic() if ready else 0.0
+            if not ready and self.navigation_enabled:
+                self.navigation_enabled = False
+                self.stop_reason = "Navigation paused until saved-map relocalization succeeds"
+                self.authority.halt()
+                self.cmd_vel.publish(Twist())
 
     @rpc
     def start(self):
@@ -259,6 +276,7 @@ class ControlGate(Module):
             }
             if (
                 self.navigation_enabled
+                and self.localized()
                 and enabled(self.profile, "navigation")
                 and self.authority.valid(self.authority.epoch, {"explore", "agent"})
                 and go2_sensor_recent(self.last_odom, time.monotonic())
@@ -281,7 +299,8 @@ class ControlGate(Module):
                             or (self.authority.mode == "agent" and self.navigation_enabled)
                         )
                         and (
-                            not go2_sensor_recent(self.last_lidar, time.monotonic())
+                            not self.localized()
+                            or not go2_sensor_recent(self.last_lidar, time.monotonic())
                             or not go2_sensor_recent(self.last_map, time.monotonic())
                         )
                     )
@@ -305,6 +324,8 @@ class ControlGate(Module):
                 return False
             if enabled:
                 require(self.profile, "navigation")
+                if not self.localized():
+                    raise ValueError("Wait for saved-map relocalization before navigation")
                 if (
                     not go2_sensor_recent(self.last_lidar, time.monotonic())
                     or not go2_sensor_recent(self.last_map, time.monotonic())
@@ -332,6 +353,8 @@ class ControlGate(Module):
             )
             if capability:
                 require(self.profile, capability)
+            if mode == "explore" and not self.localized():
+                raise ValueError("Wait for saved-map relocalization before exploration")
             self.navigation_enabled = mode == "explore"
             self.cmd_vel.publish(Twist())
             self.stop_reason = None

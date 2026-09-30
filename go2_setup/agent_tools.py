@@ -48,9 +48,9 @@ ROBOT_SKILLS = {
 MOTION_SKILLS = {"navigate_with_text", "start_patrol", "follow_person"}
 
 TOOLS = [
-    ("tag_location", Place, "Save a name for the current position in the selected space. Uses DimOS spatial navigation. Names persist, but coordinates cannot be reused after reconnect until relocalization is integrated.", "Remember this as Tule's desk."),
+    ("tag_location", Place, "Save a name for the current position in the selected space. Uses DimOS spatial navigation. Names tagged while localized persist in the selected saved map. Otherwise they are only usable in the current connection.", "Remember this as Tule's desk."),
     ("list_locations", Empty, "List named places in the selected space and whether they are usable in the current connection.", "Which places have I tagged?"),
-    ("navigate_with_text", Query, "Use DimOS navigation to go to an exact saved place name in this connection. Use list_locations first. Visual object navigation and old-map relocalization are not enabled. Acceptance does not mean arrival.", "Go to Tule's desk."),
+    ("navigate_with_text", Query, "Use DimOS navigation to go to an exact saved place name when marked usable. Use list_locations first. Saved-map places require successful localization to that same map. Visual object navigation is not enabled. Acceptance does not mean arrival.", "Go to Tule's desk."),
     ("start_patrol", Empty, "Start DimOS coverage patrol in the live known map. Continuously selects reachable patrol goals until stopped. This is not a custom waypoint route. Use robot_status for progress and errors.", "Start patrolling this area."),
     ("stop_patrol", Empty, "Stop patrol and other navigation while retaining HumanCLI control.", "Stop patrol."),
     ("follow_person", Query, "Use the camera to select one described person, then follow with DimOS visual servoing and a CPU tracker. Requires OpenAI vision and a clear mapped corridor. Can lose or confuse the target; use supervised open-space demos. Returns before detection completes. Stop existing navigation first.", "Follow the person wearing a blue shirt."),

@@ -106,7 +106,8 @@ def follow_corridor_clear(snapshot, x, yaw):
 class Places:
     """Persistent names scoped to a space AND this odometry frame's lifetime."""
 
-    def __init__(self, root, frame):
+    def __init__(self, root, frame, localization=None):
+        self.localization = localization or (lambda: {})
         self.path = root / "named-places.sqlite"
         self.frame, self.space, self.yaw = frame, None, 0
         with sqlite3.connect(self.path) as db:
@@ -114,21 +115,34 @@ class Places:
                 "CREATE TABLE IF NOT EXISTS places (space TEXT, name TEXT, frame TEXT, pose TEXT, PRIMARY KEY(space,name))"
             )
 
+    def anchor(self):
+        state = self.localization()
+        if not state.get("id"):
+            return self.frame, None
+        if state.get("status") != "localized" or self.space != state.get("space_id"):
+            raise ValueError("Select the matching space and wait for saved-map relocalization")
+        return "map:" + state["id"] + ":" + state["fingerprint"], np.asarray(state["world_from_map"])
+
     def tag_location(self, location):
         if not self.space:
             raise ValueError("Select a space before tagging a location")
+        frame, world_from_map = self.anchor()
+        pose = dict(x=location.position[0], y=location.position[1], z=location.position[2], yaw=self.yaw)
+        if world_from_map is not None:
+            from go2_setup.localization import transform_pose
+            pose = transform_pose(np.linalg.inv(world_from_map), pose)
         with sqlite3.connect(self.path) as db:
             db.execute(
                 "INSERT OR REPLACE INTO places VALUES (?,?,?,?)",
                 (
                     self.space,
                     location.name.strip().casefold(),
-                    self.frame,
+                    frame,
                     json.dumps(
                         {
                             "name": location.name.strip(),
-                            "position": location.position,
-                            "rotation": [0, 0, self.yaw],
+                            "position": [pose["x"], pose["y"], pose["z"]],
+                            "rotation": [0, 0, pose["yaw"]],
                         }
                     ),
                 ),
@@ -145,22 +159,33 @@ class Places:
             ).fetchone()
         if row is None:
             return None
-        if row[0] != self.frame:
+        frame, world_from_map = self.anchor()
+        if row[0] != frame:
             raise ValueError(
                 "This place belongs to an earlier connection. Saved-map relocalization is not active. Tag it again in this session before navigating."
             )
-        return RobotLocation(**json.loads(row[1]))
+        value = json.loads(row[1])
+        if world_from_map is not None:
+            from go2_setup.localization import transform_pose
+            pose = transform_pose(world_from_map, dict(x=value["position"][0], y=value["position"][1],
+                                                      z=value["position"][2], yaw=value["rotation"][2]))
+            value.update(position=[pose["x"], pose["y"], pose["z"]], rotation=[0, 0, pose["yaw"]])
+        return RobotLocation(**value)
 
     def query_by_text(self, query):
         return []  # No semantic image database is configured in this product.
 
     def list(self):
+        try:
+            current_frame, _ = self.anchor()
+        except ValueError:
+            current_frame = None
         with sqlite3.connect(self.path) as db:
             rows = db.execute(
                 "SELECT frame,pose FROM places WHERE space=? ORDER BY name", (self.space,)
             ).fetchall()
         return [
-            {"name": json.loads(pose)["name"], "usable": frame == self.frame}
+            {"name": json.loads(pose)["name"], "usable": frame == current_frame}
             for frame, pose in rows
         ]
 
@@ -403,12 +428,12 @@ class RobotSpeech(SpeakSkill):
 
 
 class RobotSkills:
-    def __init__(self, root, gate, planner, bridge, connection, replay=False):
+    def __init__(self, root, gate, planner, bridge, connection, replay=False, localization=None):
         self.gate, self.planner, self.bridge, self.connection = gate, planner, bridge, connection
         self.replay = replay
         self.lock = threading.RLock()
         self.frame = uuid.uuid4().hex
-        self.places = Places(root, self.frame)
+        self.places = Places(root, self.frame, localization)
         self.config = AgentSettings(root)
         self.epoch = None
         self.generation = 0

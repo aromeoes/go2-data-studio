@@ -30,6 +30,8 @@ def remove_segment(ident, catalog, supervisor, jobs, cloud):
         if replay and Path(replay).resolve() == Path(segment["path"]).resolve():
             raise ValueError("Disconnect the replay before deleting this segment")
         maps = catalog.list("map", ident)
+        if any(m["id"] == getattr(supervisor, "localization_map_id", None) for m in maps):
+            raise ValueError("Switch to the live map before deleting the selected localization map")
         if any(m["status"] in {"queued", "running"} or m["id"] in jobs.processes for m in maps):
             raise ValueError("Wait for map generation to finish before deleting this segment")
         session = catalog.get(segment["parent"], "session")

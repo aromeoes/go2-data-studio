@@ -28,7 +28,7 @@ from go2_setup.sdk_bridge import ConsoleSDK, sdk_blueprint
 from go2_setup.profiles import from_env, enabled, require
 
 
-def build_blueprint(session_profile, ip="", replay=None, config=None):
+def build_blueprint(session_profile, ip="", replay=None, config=None, localization=None):
     config = config or {}
     modules = [
         PassiveGo2Connection.blueprint(ip="replay" if replay else ip, velocity_api=True),
@@ -44,6 +44,12 @@ def build_blueprint(session_profile, ip="", replay=None, config=None):
             ),
             CostMapper.blueprint(),
         ]
+    if localization and enabled(session_profile, "mapping"):
+        from go2_setup.relocalization_module import ConsoleRelocalization, ROOM_CONFIG
+        modules.append(ConsoleRelocalization.blueprint(
+            map_file=localization["path"], relocalize=ROOM_CONFIG, use_carving=False,
+            reloc_interval=4., relocalize_once=True, min_local_points=2000,
+        ))
     if enabled(session_profile, "navigation"):
         modules.append(ReplanningAStarPlanner.blueprint())
     if enabled(session_profile, "exploration"):
@@ -93,7 +99,8 @@ def main():
     else:
         config.update(replay=False)
     session_profile = from_env()
-    blueprint = build_blueprint(session_profile, args.ip, args.replay, config)
+    localization = json.loads(os.environ.get("GO2_LOCALIZATION", "null"))
+    blueprint = build_blueprint(session_profile, args.ip, args.replay, config, localization)
     dimos = Dimos()
     dimos.run(blueprint)
     gate = dimos.get_module("ControlGate")
@@ -106,11 +113,37 @@ def main():
     explorer = (
         dimos.get_module("ConsoleExplorer") if enabled(session_profile, "exploration") else None
     )
+    relocalizer = (dimos.get_module("ConsoleRelocalization")
+                   if localization and enabled(session_profile, "mapping") else None)
+    localization_done = threading.Event()
+    localization_status = {"status": "loading" if relocalizer else "inactive"}
+
+    def poll_localization():
+        while not localization_done.is_set():
+            try:
+                current = relocalizer.state()
+                ready = (current["status"] == "localized" and
+                         time.time() - current.get("merged_at", 0) < 10)
+                if current["status"] == "localized" and not ready:
+                    current = {**current, "status": "stale", "message": "Waiting for fresh aligned map data"}
+                gate.localization_state(ready)
+                localization_status.update(current)
+            except Exception:
+                localization_status.update(status="error", message="Relocalization module is not responding")
+                try:
+                    gate.localization_state(False)
+                except Exception:
+                    pass
+            localization_done.wait(.5)
+
+    if relocalizer:
+        threading.Thread(target=poll_localization, daemon=True).start()
     connection = dimos.get_module("PassiveGo2Connection")
     skills = None
     if enabled(session_profile, "humancli"):
         from go2_setup.robot_skills import RobotSkills
-        skills = RobotSkills(Settings().root, gate, planner, bridge, connection, replay=bool(args.replay))
+        skills = RobotSkills(Settings().root, gate, planner, bridge, connection, replay=bool(args.replay),
+                             localization=lambda: {**(localization or {}), **localization_status})
     lock = threading.RLock()
     token = os.environ["GO2_RUNTIME_TOKEN"]
 
@@ -152,8 +185,18 @@ def main():
                             "transport": connection.transport_state(),
                             "replay": bool(args.replay),
                         }
+                        result["localization"] = {**(localization or {}), **localization_status}
+                        if localization_status.get("world_from_map") and result.get("pose"):
+                            import numpy as np
+                            from go2_setup.localization import transform_pose
+                            result["localization"]["map_pose"] = transform_pose(
+                                np.linalg.inv(localization_status["world_from_map"]), result["pose"])
                         result["navigation"] = navigation_status.snapshot(result)
                         result["skills"] = skills.state() if skills else None
+                    elif self.path == "/localization/confirm":
+                        if not relocalizer or gate.state()["mode"] != "idle":
+                            raise ValueError("Pause movement before confirming localization")
+                        result = relocalizer.confirm()
                     elif self.path == "/mode":
                         capability = {
                             "teleop": "teleop",
@@ -270,6 +313,7 @@ def main():
                 skills.close()
         finally:
             server.server_close()
+            localization_done.set()
             dimos.stop()
             router.close()
 

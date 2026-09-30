@@ -19,7 +19,7 @@ export function RobotSkillStatus({ state }: { state?: RobotSkillState | null }) 
           <ul>
             {state.places.map((place) => (
               <li key={place.name}>
-                {place.name}: {place.usable ? "ready in this session" : "tag again after reconnect"}
+                {place.name}: {place.usable ? "ready" : "requires matching map or a new tag"}
               </li>
             ))}
           </ul>
@@ -32,7 +32,7 @@ export function RobotSkillStatus({ state }: { state?: RobotSkillState | null }) 
           <li>Switch to HumanCLI and say “Start patrolling this area.” Keep the control page active.</li>
           <li>Say “Stop patrol” to pause, or take over with Teleop. Use Emergency stop when needed.</li>
         </ol>
-        <p>Patrol chooses destinations in the current live map. It does not load a saved map or follow a custom route.</p>
+        <p>Patrol uses the current navigation map, including the saved map after relocalization. Custom routes are not supported yet.</p>
       </details>
     </section>
   );

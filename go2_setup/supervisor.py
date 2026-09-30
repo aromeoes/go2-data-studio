@@ -15,7 +15,8 @@ import time
 from dotenv import dotenv_values
 import requests
 
-from go2_setup.catalog import Catalog
+from go2_setup.catalog import Catalog, atomic_json
+from go2_setup.localization import selected_map
 from go2_setup.control import go2_sensor_recent
 from go2_setup.config import Settings
 from go2_setup.diagnostics import FailureDiagnostics
@@ -52,6 +53,11 @@ class Supervisor:
         self.last_discovery = 0.0
         self.profile = profile("legacy")
         self.robot_id = None
+        self.localization_file = settings.root / "localization.json"
+        try:
+            self.localization_map_id = json.loads(self.localization_file.read_text()).get("map_id")
+        except (OSError, ValueError):
+            self.localization_map_id = None
         self.env = (
             {
                 k: v
@@ -199,6 +205,8 @@ class Supervisor:
             **self.env,
             "GO2_RUNTIME_TOKEN": self.token,
             "GO2_SESSION_PROFILE": json.dumps(self.profile),
+            "GO2_LOCALIZATION": json.dumps(selected_map(self.catalog, self.localization_map_id)
+                                            if self.robot_kind == "go2" else None),
             "GO2_CONSOLE_URL": f"http://127.0.0.1:{self.settings.port}",
             "GO2_RELAY_URL": self.relay.url,
             "GO2_RELAY_KEY": self.relay.robot_token,
@@ -438,6 +446,21 @@ class Supervisor:
             )
             return {"ok": True, "profile": config}
 
+    def select_map(self, map_id):
+        with self.lock:
+            if self.robot_kind != "go2":
+                raise ValueError("Saved-map localization currently supports Go2 only")
+            if self.mode != "idle" or self.session or self.segment:
+                raise ValueError("Pause movement and save the recording before selecting a map")
+            if self.target and self.connection != "online":
+                raise ValueError("Wait for the connection or disconnect before selecting a map")
+            selection = selected_map(self.catalog, map_id)
+            atomic_json(self.localization_file, {"map_id": map_id})
+            self.localization_map_id = map_id
+            if self.target:
+                self.apply_profile(self.profile)
+            return {"ok": True, "selection": selection}
+
     def change_mode(self, mode):
         with self.lock:
             if self.connection != "online":
@@ -528,8 +551,9 @@ class Supervisor:
         return dict(
             robot_id=self.robot_id,
             robot_kind=self.robot_kind,
+            localization_map_id=self.localization_map_id,
             profile=self.profile,
-            modules=module_plan(self.profile),
+            modules=module_plan(self.profile) + (["ConsoleRelocalization"] if self.localization_map_id and self.robot_kind == "go2" and "mapping" in self.profile["enabled"] else []),
             connection=self.connection,
             error=self.error,
             ip=self.ip,
