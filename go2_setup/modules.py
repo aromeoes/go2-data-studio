@@ -201,6 +201,7 @@ class PassiveGo2Connection(GO2Connection):
 
 
 class ControlGate(Module):
+    hold = False  # Movement toggle; see set_hold.
     global_costmap: In[OccupancyGrid]
     lidar: In[PointCloud2]
     nav_cmd_vel: In[Twist]
@@ -219,6 +220,8 @@ class ControlGate(Module):
         self.last_teleop = 0.0
         self.done = threading.Event()
         self.navigation_enabled = False
+        # Movement toggle: while held, no teleop or navigation velocity reaches the robot.
+        self.hold = False
         self.nav_received = 0
         self.nav_forwarded = 0
         self.last_nav = None
@@ -259,6 +262,7 @@ class ControlGate(Module):
             }
             if (
                 self.navigation_enabled
+                and not self.hold
                 and enabled(self.profile, "navigation")
                 and self.authority.valid(self.authority.epoch, {"explore", "agent"})
                 and go2_sensor_recent(self.last_odom, time.monotonic())
@@ -345,6 +349,19 @@ class ControlGate(Module):
             return token
 
     @rpc
+    def set_profile(self, config: dict) -> None:
+        """Session modules were added to the running connection."""
+        with self.authority.lock:
+            self.profile = config
+
+    @rpc
+    def set_hold(self, on: bool) -> None:
+        with self.authority.lock:
+            self.hold = bool(on)
+            if self.hold:
+                self.cmd_vel.publish(Twist())
+
+    @rpc
     def clear(self) -> None:
         self.authority.clear()
 
@@ -359,6 +376,7 @@ class ControlGate(Module):
             self.teleop_requested.publish(Twist((x, y, 0), (0, 0, yaw)))
             if (
                 not enabled(self.profile, "teleop")
+                or self.hold
                 or not self.authority.valid(epoch, {"teleop"})
                 or not go2_sensor_recent(self.last_odom, time.monotonic())
             ):
@@ -379,6 +397,7 @@ class ControlGate(Module):
             nav_forwarded=self.nav_forwarded,
             last_nav=self.last_nav,
             stop_reason=self.stop_reason,
+            hold=self.hold,
         )
 
     @rpc
@@ -483,8 +502,12 @@ class ConsoleBridge(Module):
             return {**self.telemetry, "recording": self.writer.state() if self.writer else None}
 
     @rpc
+    def set_profile(self, config: dict) -> None:
+        self.profile = config
+
+    @rpc
     def begin_recording(self, path: str) -> dict:
-        require(from_env(), "recording")
+        require(getattr(self, "profile", None) or from_env(), "recording")
         with self.lock:
             if self.writer:
                 raise ValueError("A recording is already active")

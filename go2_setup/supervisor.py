@@ -52,6 +52,9 @@ class Supervisor:
         self.last_discovery = 0.0
         self.profile = profile("legacy")
         self.robot_id = None
+        # Single connection: modules are added to the running session, never by restarting.
+        self.loading_modules = False
+        self.hold = False
         self.env = (
             {
                 k: v
@@ -134,6 +137,8 @@ class Supervisor:
             kind = selected_robot["kind"] if selected_robot else "go2"
             self.profile = profile(**{**(config or {"preset": "assistant" if kind == "vector" else "legacy"}), "kind": kind})
             self.robot_id = robot_id
+            self.loading_modules = False
+            self.hold = False
             self.target = {
                 "kind": kind,
                 "sdk_config": selected_robot.get("sdk_config", "") if selected_robot else "",
@@ -229,6 +234,7 @@ class Supervisor:
         log.close()
         self.epoch = 0
         self.mode = "idle"
+        self.hold = False
         self.telemetry = {}
         self.connection = "connecting"
         self.started = self.last_ok = time.monotonic()
@@ -412,6 +418,8 @@ class Supervisor:
                 self._terminate()
                 self.process = None
                 self.connection = "offline"
+                self.loading_modules = False
+                self.hold = False
                 self.mode = "idle"
                 self.epoch += 1
                 self.telemetry = {}
@@ -419,29 +427,66 @@ class Supervisor:
                 self.catalog.update(self.session["id"], status="closed", ended=time.time())
                 self.session = None
 
-    def apply_profile(self, config):
-        config = profile(**{**config, "kind": self.robot_kind})
+    def add_modules(self, preset, modules):
+        """Start the session: add the selected modules to the running connection.
+
+        Loading runs in the background so telemetry keeps flowing; the profile is
+        recorded first, so a reconnect during loading relaunches with every module.
+        """
+        config = profile(preset, kind=self.robot_kind, modules=modules)
         with self.lock:
             if not self.target or self.connection != "online":
-                raise ValueError("Connect the robot before starting a session")
-            if self.mode != "idle":
-                raise ValueError("Pause movement before applying session changes")
-            if self.session or self.segment:
-                raise ValueError("Save the current recording before applying session changes")
-            ip, replay, robot_id = self.ip, self.target.get("replay"), self.robot_id
-            self.disconnect()
-            self.connect(ip, replay, robot_id, config)
-            if robot_id:
-                self.robots.remember_profile(robot_id, config)
-            self.catalog.event(
-                "profile", "Session configured: " + config["preset"] + ". Movement remains idle."
-            )
-            return {"ok": True, "profile": config}
+                raise ValueError("Wait for the robot to connect")
+            if self.profile.get("preset") != "base":
+                raise ValueError("The blueprint cannot change once the session has started")
+            if self.loading_modules:
+                raise ValueError("Modules are already loading")
+            if self.mode != "idle" or self.session:
+                raise ValueError("Pause movement and save the recording first")
+            previous, self.profile, self.loading_modules = self.profile, config, True
+            robot_id = self.robot_id
+
+        def load():
+            try:
+                self.call("/modules", {"profile": config}, timeout=180)
+                if robot_id:
+                    self.robots.remember_profile(robot_id, config)
+                self.catalog.event("profile", f"Session started with {len(config['modules'])} modules")
+            except Exception as error:
+                with self.lock:
+                    if self.profile is config:
+                        self.profile = previous
+                    self.error = f"Could not start the session: {error}"
+            finally:
+                with self.lock:
+                    self.loading_modules = False
+
+        threading.Thread(target=load, daemon=True).start()
+        return {"ok": True, "loading": True, "profile": config}
+
+    def set_hold(self, on):
+        """Movement toggle: when on, the robot stays in place in every mode."""
+        with self.lock:
+            if self.connection != "online":
+                raise ValueError("Connect the robot first")
+            self.call("/hold", {"on": bool(on)}, timeout=10)
+            self.hold = bool(on)
+            self.catalog.event("control", "Movement off" if self.hold else "Movement on")
+            return {"ok": True, "hold": self.hold}
+
+    def require_session(self):
+        """Nothing moves before START: the base connection is for choosing modules."""
+        if self.profile.get("preset") == "base":
+            raise ValueError("Start the session before driving")
+        if self.loading_modules:
+            raise ValueError("Modules are loading. Wait a moment.")
 
     def change_mode(self, mode):
         with self.lock:
             if self.connection != "online":
                 raise ValueError("Go2 is not connected")
+            if mode != "idle":
+                self.require_session()
             required = {"teleop": "teleop", "agent": "humancli", "explore": "exploration"}.get(mode)
             if required:
                 require(self.profile, required)
@@ -530,6 +575,9 @@ class Supervisor:
             robot_kind=self.robot_kind,
             profile=self.profile,
             modules=module_plan(self.profile),
+            selected_modules=self.profile.get("modules"),
+            loading_modules=self.loading_modules,
+            hold=self.hold,
             connection=self.connection,
             error=self.error,
             ip=self.ip,

@@ -39,6 +39,8 @@ class VectorController:
         self.preempted = False
         self.stop_pending = False
         self.forward_blocked = False
+        # Movement toggle: treads stay still; head, lift and speech still work.
+        self.hold = False
 
     def state(self):
         with self.lock:
@@ -52,6 +54,7 @@ class VectorController:
                 if self.authority.estop
                 else ("app" if self.owned else "native"),
                 action=self.action,
+                hold=self.hold,
             )
 
     def check_sensors(self, forward=False):
@@ -128,9 +131,16 @@ class VectorController:
             self.owned = False
             return self.state()
 
+    def set_hold(self, on):
+        with self.lock:
+            self.hold = bool(on)
+            if self.hold:
+                self._stop()
+            return self.state()
+
     def teleop(self, epoch, x, y, yaw):
         with self.lock:
-            if not self.authority.valid(epoch, {"teleop"}):
+            if self.hold or not self.authority.valid(epoch, {"teleop"}):
                 return False
             if not all(math.isfinite(v) for v in (x, y, yaw)):
                 raise ValueError("Invalid velocity")
@@ -279,6 +289,9 @@ class VectorController:
             with self.lock:
                 if not self._valid(operation, epoch):
                     return {"completed": False}
+                if self.hold:
+                    self._stop()
+                    raise ValueError("Movement is off. Turn it on to drive.")
                 s = self.check_sensors(forward=sign > 0)
                 pose = s["pose"]
                 if not pose or pose["origin_id"] != start["origin_id"]:

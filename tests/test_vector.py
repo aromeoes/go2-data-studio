@@ -7,6 +7,7 @@ from unittest.mock import Mock
 import pytest
 from fastapi.testclient import TestClient
 from go2_setup.profiles import profile, module_plan
+from go2_setup.blueprints import base_profile
 from go2_setup.robots import Robots
 from go2_setup.vector.control import VectorController
 from go2_setup.vector.tools import validate
@@ -181,19 +182,19 @@ def test_vector_connect_profile_dispatch_and_go2_guard(tmp_path, monkeypatch):
         h = {"X-Go2-Request": "1"}
         ident = s.robots.list()[0]["id"]
         assert client.post("/api/connect", headers=h, json={"robot_id": ident}).status_code == 200
-        assert s.profile == profile("assistant", kind="vector")
+        assert s.profile == base_profile("vector")
         assert s.mode == "idle"
         s.connection = "online"
         s.call = Mock(return_value={})
         assert client.post("/api/mode", headers=h, json={"mode": "explore"}).status_code == 409
         assert (
             client.post(
-                "/api/session/profile",
+                "/api/session/modules",
                 headers=h,
                 json={
                     "robot_id": ident,
-                    "preset": "assistant",
-                    "enabled": profile("assistant", kind="vector")["enabled"],
+                    "preset": "custom",
+                    "modules": ["VectorConnection", "RelayBridgeModule", "VectorTelemetry", "McpClient", "VectorSkills"],
                 },
             ).status_code
             == 200

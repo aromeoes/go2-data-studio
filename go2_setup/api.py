@@ -30,7 +30,8 @@ from go2_setup.supervisor import Supervisor
 from go2_setup.sdk_relay import ConsoleRelay
 from go2_setup.sdk_control import CommandOwner
 from go2_setup.platform_files import reveal_file
-from go2_setup.profiles import catalog as profile_catalog, profile, require
+from go2_setup.profiles import catalog as profile_catalog, require
+from go2_setup.blueprints import base_profile, catalog as blueprint_catalog
 
 
 class ConnectBody(BaseModel):
@@ -47,10 +48,14 @@ class RobotBody(BaseModel):
     sdk_config: str = ""
 
 
-class ProfileBody(BaseModel):
+class SessionBody(BaseModel):
     robot_id: str | None = None
     preset: str
-    enabled: list[str]
+    modules: list[str]
+
+
+class HoldBody(BaseModel):
+    on: bool
 
 
 class UnitreeActionBody(BaseModel):
@@ -123,6 +128,8 @@ def create_app(settings: Settings | None = None):
     settings = settings or Settings()
     settings.initialize()
     catalog = Catalog(settings.root)
+    if not catalog.list("space"):
+        catalog.space("Starting space")
     supervisor = Supervisor(settings, catalog)
     relay = ConsoleRelay(settings)
     supervisor.relay = relay
@@ -313,6 +320,10 @@ def create_app(settings: Settings | None = None):
     def cloud_refresh():
         return cloud.refresh()
 
+    @app.post("/api/cloud/signout")
+    def cloud_signout():
+        return cloud.sign_out()
+
     @app.post("/api/cloud/uploads/{segment_id}")
     def cloud_upload(segment_id: str, body: UploadBody | None = None):
         return cloud.start(segment_id, name=body.name) if body else cloud.start(segment_id)
@@ -351,6 +362,7 @@ def create_app(settings: Settings | None = None):
             "robots": supervisor.robots.list(),
             "supported_robots": ["go2", "vector"],
             "embodiments": {"go2": profile_catalog(), "vector": __import__("go2_setup.vector.profiles", fromlist=["catalog"]).catalog()},
+            "sessions": {"go2": blueprint_catalog("go2"), "vector": blueprint_catalog("vector")},
         }
 
     @app.post("/api/robots")
@@ -368,16 +380,20 @@ def create_app(settings: Settings | None = None):
     def robot_availability():
         return supervisor.robots.availability()
 
-    @app.post("/api/session/profile")
-    def session_profile(body: ProfileBody):
-        config = profile(body.preset, body.enabled, kind=supervisor.robot_kind)
-        # Cancel only after validation. The supervisor requires idle and no recording.
+    @app.post("/api/session/modules")
+    def session_modules(body: SessionBody):
         with supervisor.lock:
             if body.robot_id != supervisor.robot_id:
-                raise ValueError("The selected robot changed. Reopen Session setup.")
-            result = supervisor.apply_profile(config)
+                raise ValueError("The selected robot changed. Go back and choose it again.")
+        result = supervisor.add_modules(body.preset, body.modules)
         agent.new_conversation()
         return result
+
+    @app.post("/api/hold")
+    def hold(body: HoldBody):
+        if body.on:
+            agent.cancel()
+        return supervisor.set_hold(body.on)
 
     @app.post("/api/connect")
     def connect(body: ConnectBody):
@@ -394,10 +410,10 @@ def create_app(settings: Settings | None = None):
                 raise ValueError("Choose a robot or a replay, not both")
             if body.robot_id:
                 saved = supervisor.robots.get(body.robot_id)
-                config = saved["profile"] if saved["kind"] == "vector" else profile("preview")
-                supervisor.connect(robot_id=body.robot_id, config=config)
+                # One connection per session: required modules now, the rest at START.
+                supervisor.connect(robot_id=body.robot_id, config=base_profile(saved["kind"]))
             else:
-                supervisor.connect(body.ip, replay)
+                supervisor.connect(body.ip, replay, config=base_profile("go2"))
         return {"ok": True}
 
     @app.post("/api/disconnect")
@@ -459,6 +475,7 @@ def create_app(settings: Settings | None = None):
         with supervisor.lock:
             if supervisor.robot_kind != "go2" or supervisor.connection != "online":
                 raise ValueError("Connect Go2 before running Unitree actions")
+            supervisor.require_session()
             require(supervisor.profile, "teleop")
             if supervisor.mode != "idle":
                 raise ValueError("Pause movement before running a Unitree action")
@@ -470,6 +487,7 @@ def create_app(settings: Settings | None = None):
     def posture(action: str):
         if supervisor.connection != "online":
             raise ValueError("Go2 disconnected")
+        supervisor.require_session()
         return supervisor.call("/posture", {"action": action}, timeout=20)
 
     @app.post("/api/record/start")

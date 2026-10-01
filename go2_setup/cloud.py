@@ -195,6 +195,19 @@ class CloudBackups:
             self.login_worker.start()
             return self.status()
 
+    def sign_out(self):
+        """Forget this device's DimOS Cloud key. Local recordings and backup badges stay."""
+        with self.lock:
+            if self.active:
+                raise CloudError("Pause the upload before signing out.")
+            if os.environ.get("DIMOS_API_KEY"):
+                raise CloudError("This device is signed in through DIMOS_API_KEY. Remove it to sign out.")
+            self.stop.set()
+            self.credentials.unlink(missing_ok=True)
+            self.account = self.quota = self.login = self.error = None
+            self.stop = threading.Event()
+            return self.status()
+
     def _login(self, device):
         interval = max(5, device["interval"])
         deadline = time.time() + device["expires_in"]

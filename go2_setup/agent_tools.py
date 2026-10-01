@@ -46,6 +46,20 @@ ROBOT_SKILLS = {
     "follow_person", "stop_following", "speak",
 }
 MOTION_SKILLS = {"navigate_with_text", "start_patrol", "follow_person"}
+# Session module each skill tool belongs to. Tools of unselected modules are hidden.
+SKILL_MODULES = {
+    "tag_location": "NavigationSkillContainer",
+    "list_locations": "NavigationSkillContainer",
+    "navigate_with_text": "NavigationSkillContainer",
+    "start_patrol": "PatrollingModule",
+    "stop_patrol": "PatrollingModule",
+    "follow_person": "PersonFollowSkillContainer",
+    "stop_following": "PersonFollowSkillContainer",
+    "speak": "SpeakSkill",
+    "start_exploration": "WavefrontFrontierExplorer",
+    "start_recording": "ConsoleBridge",
+    "save_recording": "ConsoleBridge",
+}
 
 TOOLS = [
     ("tag_location", Place, "Save a name for the current position in the selected space. Uses DimOS spatial navigation. Names persist, but coordinates cannot be reused after reconnect until relocalization is integrated.", "Remember this as Tule's desk."),
@@ -135,10 +149,13 @@ def tool_enabled(name, config=None):
         return (enabled(config, "humancli") and name in {t[0] for t in tools_for(config)}
                 and (name != "camera_view" or enabled(config, "camera"))
                 and (name not in {"find_person", "visible_faces"} or enabled(config, "faces")))
+    from go2_setup.blueprints import has_module
+
     return config is None or (
         enabled(config, "humancli")
         and (name not in TOOL_CAPABILITIES or enabled(config, TOOL_CAPABILITIES[name]))
         and (name != "follow_person" or enabled(config, "camera"))
+        and (name not in SKILL_MODULES or has_module(config, SKILL_MODULES[name]))
     )
 
 

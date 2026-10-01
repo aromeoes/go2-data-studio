@@ -6,6 +6,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from go2_setup.profiles import profile, module_plan
+from go2_setup.blueprints import base_profile, catalog as blueprint_catalog
 from go2_setup.robots import Robots
 from go2_setup.api import create_app
 from go2_setup.config import Settings
@@ -67,7 +68,7 @@ def test_robot_migration_persistence_and_duplicate_rejection(tmp_path):
         robots.save("Vector", "192.168.1.75", kind="vector")
 
 
-def test_robot_connection_is_preview_and_cannot_start_motion(tmp_path, monkeypatch):
+def test_robot_connection_is_base_and_cannot_start_motion(tmp_path, monkeypatch):
     app = create_app(Settings(root=tmp_path, env_file=tmp_path / "absent"))
     s = app.state.supervisor
     monkeypatch.setattr(s, "_launch", lambda: None)
@@ -80,7 +81,7 @@ def test_robot_connection_is_preview_and_cannot_start_motion(tmp_path, monkeypat
             client.post("/api/connect", headers=HEADERS, json={"robot_id": ident}).status_code
             == 200
         )
-        assert s.profile == profile("preview") and s.mode == "idle"
+        assert s.profile == base_profile("go2") and s.mode == "idle"
         assert client.get("/api/state").json()["robot_id"] == ident
         s.connection = "online"
         s.call = Mock(return_value={})
@@ -90,34 +91,41 @@ def test_robot_connection_is_preview_and_cannot_start_motion(tmp_path, monkeypat
         s.connection = "offline"
 
 
-def test_apply_requires_idle_saved_recording_and_matching_robot(tmp_path, monkeypatch):
+def test_start_adds_modules_to_the_same_connection(tmp_path, monkeypatch):
     app = create_app(Settings(root=tmp_path, env_file=tmp_path / "absent"))
     s = app.state.supervisor
     monkeypatch.setattr(s, "_launch", lambda: None)
     with TestClient(app) as client:
         saved = s.robots.save("Go2", "192.168.1.73")
-        s.connect(robot_id=saved["id"], config=profile("preview"))
+        s.connect(robot_id=saved["id"], config=base_profile("go2"))
         s.connection = "online"
-        s.call = Mock(return_value={})
-        body = {**profile("drive"), "robot_id": saved["id"]}
+        s.call = Mock(return_value={"ok": True})
+        teleop = next(b for b in blueprint_catalog("go2")["blueprints"] if b["id"] == "teleop")
+        body = {"robot_id": saved["id"], "preset": "teleop", "modules": teleop["modules"]}
         s.mode = "teleop"
-        assert client.post("/api/session/profile", headers=HEADERS, json=body).status_code == 409
+        assert client.post("/api/session/modules", headers=HEADERS, json=body).status_code == 409
         s.mode = "idle"
         s.session = {"id": "recording"}
-        assert client.post("/api/session/profile", headers=HEADERS, json=body).status_code == 409
+        assert client.post("/api/session/modules", headers=HEADERS, json=body).status_code == 409
         s.session = None
-        assert (
-            client.post(
-                "/api/session/profile", headers=HEADERS, json={**body, "robot_id": "other"}
-            ).status_code
-            == 409
-        )
+        other = {**body, "robot_id": "other"}
+        assert client.post("/api/session/modules", headers=HEADERS, json=other).status_code == 409
+        locked = {**body, "modules": [*teleop["modules"], "McpClient"]}
+        assert client.post("/api/session/modules", headers=HEADERS, json=locked).status_code == 409
         s.call.assert_not_called()
-        response = client.post("/api/session/profile", headers=HEADERS, json=body)
+        response = client.post("/api/session/modules", headers=HEADERS, json=body)
         assert response.status_code == 200, response.text
-        s.call.assert_called_once_with("/halt")
-        assert s.mode == "idle" and s.profile == profile("drive")
-        assert s.robots.get(saved["id"])["profile"] == profile("drive")
+        deadline = time.monotonic() + 5
+        while s.loading_modules and time.monotonic() < deadline:
+            time.sleep(0.01)
+        expected = profile("teleop", modules=teleop["modules"])
+        # The robot is never disconnected: modules go to the running runtime.
+        s.call.assert_called_once_with("/modules", {"profile": expected}, timeout=180)
+        assert s.target is not None and s.profile == expected
+        assert s.robots.get(saved["id"])["profile"] == expected
+        state = client.get("/api/state").json()
+        assert state["selected_modules"] == teleop["modules"] and state["loading_modules"] is False
+        assert client.post("/api/session/modules", headers=HEADERS, json=body).status_code == 409
 
 
 def test_teleop_and_chat_do_not_require_mapping_but_navigation_does(monkeypatch):

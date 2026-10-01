@@ -69,8 +69,24 @@ def main():
     dimos.run(build_blueprint(profile, config))
     connection = dimos.get_module("VectorConnection")
     telemetry = dimos.get_module("VectorTelemetry")
-    skills = dimos.get_module("VectorSkills") if enabled(profile, "humancli") else None
+    # Modules can be added while connected, so their handles live here.
+    rt = {"profile": profile, "skills": dimos.get_module("VectorSkills") if enabled(profile, "humancli") else None}
+    lock = threading.Lock()
     token = os.environ["GO2_RUNTIME_TOKEN"]
+
+    def add_modules(new_profile):
+        """Add HumanCLI skills to the running connection. Nothing is removed."""
+        with lock:
+            missing = [c for c in rt["profile"]["enabled"] if c not in new_profile["enabled"]]
+            if missing:
+                raise ValueError("Modules cannot be removed from a running session")
+            connection.control("/halt", {})
+            if enabled(new_profile, "humancli") and rt["skills"] is None:
+                dimos.run(autoconnect(VectorSkills.blueprint()))
+                rt["skills"] = dimos.get_module("VectorSkills")
+            connection.set_profile(new_profile)
+            rt["profile"] = new_profile
+            return {"ok": True}
 
     class Handler(BaseHTTPRequestHandler):
         def log_message(self, *args):
@@ -91,12 +107,16 @@ def main():
                         "control": connection.control_state(),
                         "replay": False,
                     }
+                elif self.path == "/modules":
+                    from go2_setup.profiles import profile as make_profile
+
+                    result = add_modules(make_profile(**data["profile"]))
                 elif self.path == "/vector/action":
-                    if skills is None:
+                    if rt["skills"] is None:
                         raise ValueError("HumanCLI is disabled")
                     name = data["name"]
                     arguments = validate(name, data.get("arguments", {}))
-                    result = getattr(skills, name)(epoch=data["epoch"], **arguments)
+                    result = getattr(rt["skills"], name)(epoch=data["epoch"], **arguments)
                 else:
                     result = connection.control(self.path, data)
                 status = 200

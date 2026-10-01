@@ -176,7 +176,16 @@ class VectorConnection(Module):
                 return {"ok": True}
         if path == "/vector/personality":
             return c.native()
+        if path == "/hold":
+            return c.set_hold(data.get("on"))
         raise ValueError("Unsupported Vector control")
+
+    @rpc
+    def set_profile(self, config: dict) -> None:
+        """Session modules were added to the running connection."""
+        self.profile = config
+        self.driver.profile = config
+        self.controller.profile = config
 
     @rpc
     def control_state(self) -> dict:

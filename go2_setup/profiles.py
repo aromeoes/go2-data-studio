@@ -98,7 +98,12 @@ PRESETS = [
 ]
 
 
-def profile(preset="map-record", enabled=None, kind="go2"):
+def profile(preset="map-record", enabled=None, kind="go2", modules=None):
+    if modules is not None:
+        # Blueprint sessions: the module list is the source of truth.
+        from go2_setup.blueprints import session_profile
+
+        return session_profile(kind, preset, modules)
     if kind == "vector":
         from go2_setup.vector.profiles import profile as vector_profile
         return vector_profile(preset, enabled)
@@ -153,6 +158,8 @@ def require(config, capability):
 
 
 def module_plan(config):
+    if config.get("modules") is not None:
+        return list(config["modules"])
     if config.get("kind") == "vector":
         from go2_setup.vector.profiles import REQUIRED
         return [*REQUIRED, *(["VectorSkills"] if enabled(config, "humancli") else [])]
