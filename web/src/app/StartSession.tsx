@@ -191,12 +191,27 @@ export function StartSession({
       </div>
       {starting && (
         <div className="overlay">
-          <section className="dialog loading" role="dialog" aria-modal="true" aria-label="Starting session">
+          <section
+            className="dialog loading"
+            role="dialog"
+            aria-modal="true"
+            aria-label="Starting session"
+            onKeyDown={(e) => e.key === "Escape" && !sent.current && setStarting(false)}
+          >
             <Spinner>Starting your session</Spinner>
             <ul className="steps">
               <li className={online ? "done" : "active"}>{online ? `Connected to ${robotName}` : `Connecting to ${robotName} · ${elapsed} s`}</li>
               <li className={!online ? "" : state.loading_modules || state.profile?.preset === "base" ? "active" : "done"}>Loading {selected.length} modules</li>
             </ul>
+            {/* Before the modules are sent the start can simply be withdrawn; after that, only leaving ends it. */}
+            {!sent.current && (
+              <button autoFocus onClick={() => setStarting(false)}>
+                Cancel
+              </button>
+            )}
+            <button className="link" onClick={leave}>
+              Back to robots
+            </button>
           </section>
         </div>
       )}

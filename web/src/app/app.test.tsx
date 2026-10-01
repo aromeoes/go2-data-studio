@@ -282,3 +282,16 @@ it("a delayed Teleop blur cannot release the new HumanCLI lease", async () => {
   expect(stub.command).not.toHaveBeenCalledWith("/release", { epoch });
   expect(stub.command).toHaveBeenCalledWith("/heartbeat", { epoch });
 });
+
+it("lets the user leave Starting your session while the robot is not connected", async () => {
+  await mount({ ...sessionState(), connection: "connecting", profile: { preset: "base", enabled: ["teleop", "camera", "lidar"] }, selected_modules: required });
+  await act(async () => button("START").click());
+  expect(document.querySelector('[aria-label="Starting session"]')).not.toBeNull();
+  await act(async () => button("Cancel").click());
+  expect(document.querySelector('[aria-label="Starting session"]')).toBeNull();
+  expect(requests.some((r) => r.url === "/api/session/modules")).toBe(false);
+  await act(async () => button("START").click());
+  await act(async () => button("Back to robots").click());
+  expect(requests.some((r) => r.url === "/api/disconnect")).toBe(true);
+  expect(host.textContent).toContain("Robots available");
+});
