@@ -6,7 +6,17 @@ import { api, get, RobotPicture, robotLabel, Spinner, type Notify } from "./ui";
 
 const FOUND_SECONDS = 15;
 
-export function Connect({ state, notify, onConnecting }: { state: State; notify: Notify; onConnecting: () => void }) {
+export function Connect({
+  state,
+  notify,
+  onConnecting,
+  onLibrary,
+}: {
+  state: State;
+  notify: Notify;
+  onConnecting: () => void;
+  onLibrary: () => void;
+}) {
   const [robots, setRobots] = useState<SavedRobot[] | null>(null);
   const [reach, setReach] = useState<Record<string, string>>({});
   const [scanning, setScanning] = useState(false);
@@ -79,6 +89,7 @@ export function Connect({ state, notify, onConnecting }: { state: State; notify:
     <main className="screen">
       <header className="bar">
         <span className="wordmark small">DIMENSIONAL</span>
+        <button onClick={onLibrary}>Recordings</button>
         <span className="muted">{state.cloud?.account?.email || "Local only"}</span>
       </header>
       <section className="card connect">

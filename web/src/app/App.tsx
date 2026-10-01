@@ -8,12 +8,13 @@ import { robot } from "../sdk";
 import type { SetupCatalog, State } from "../types";
 import { useControllerNavigation } from "../useControllerNavigation";
 import { Connect } from "./Connect";
+import { Library } from "./Library";
 import { Login, Onboarding } from "./Onboarding";
 import { Session } from "./Session";
 import { StartSession } from "./StartSession";
 import { get, Spinner, Toasts, useToasts } from "./ui";
 
-type Screen = "onboarding" | "login" | "connect" | "setup" | "session";
+type Screen = "onboarding" | "login" | "connect" | "library" | "setup" | "session";
 
 export function App() {
   const [state, setState] = useState<State | null>(null);
@@ -117,7 +118,19 @@ export function App() {
       )}
       {screen === "onboarding" && <Onboarding onLogin={() => setScreen("login")} onLocal={() => setScreen("connect")} />}
       {screen === "login" && <Login cloud={state.cloud} notify={push} onBack={() => setScreen("onboarding")} />}
-      {screen === "connect" && <Connect state={state} notify={push} onConnecting={() => setScreen("setup")} />}
+      {screen === "connect" && (
+        <Connect state={state} notify={push} onConnecting={() => setScreen("setup")} onLibrary={() => setScreen("library")} />
+      )}
+      {screen === "library" && (
+        <Library
+          state={state}
+          spaceId={spaceId}
+          onSpace={setSpaceId}
+          notify={push}
+          onBack={() => setScreen("connect")}
+          onReplaying={() => setScreen("setup")}
+        />
+      )}
       {screen === "setup" &&
         (catalog ? (
           <StartSession

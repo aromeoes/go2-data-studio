@@ -295,3 +295,14 @@ it("lets the user leave Starting your session while the robot is not connected",
   expect(requests.some((r) => r.url === "/api/disconnect")).toBe(true);
   expect(host.textContent).toContain("Robots available");
 });
+
+it("uploads and replays recordings from the robot list without a robot", async () => {
+  await mount({ ...sessionState(), connection: "offline", target: null, ip: "", session: null } as unknown as State);
+  await act(async () => button("Recordings").click());
+  expect(host.textContent).toContain("Segment 1");
+  expect(button("Upload dataset").disabled).toBe(false);
+  await act(async () => button("Replay").click());
+  expect(requests).toContainEqual({ url: "/api/connect", body: { segment_id: "segment1" } });
+  await act(async () => button("Robots").click());
+  expect(host.textContent).toContain("Robots available");
+});

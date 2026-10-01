@@ -923,3 +923,13 @@ details > summary {
 progress {
   width: 160px;
 }
+
+/* Recordings without a robot */
+.library {
+  display: grid;
+  gap: 12px;
+  margin: 0 12px 12px;
+}
+.library .spaces button {
+  justify-content: flex-start;
+}
