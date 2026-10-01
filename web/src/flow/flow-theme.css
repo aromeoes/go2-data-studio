@@ -1,0 +1,308 @@
+/* Current app theme (style.css) applied to the flow prototype. Colors, fonts,
+   borders and shadows only: every size, gap and padding comes from flow.css. */
+:root {
+  --ink: #e7ece5;
+  --muted: #a0aea2;
+  --line: #354137;
+  --soft: #303b32;
+  --paper: #1c231f;
+  --page: #141917;
+  --accent: #b5d9ad;
+  --danger: #f38e7d;
+  --amber: #f0c478;
+  font-family: "Inter Variable", Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-synthesis: none;
+  color-scheme: dark;
+  scrollbar-color: #435249 #141917;
+  scrollbar-width: thin;
+}
+code,
+kbd,
+.code,
+.numbers dd,
+.message.tool {
+  font-family: "SFMono-Regular", Consolas, monospace;
+}
+a {
+  color: var(--accent);
+}
+
+/* Controls */
+button,
+.button {
+  border-color: #3a463c;
+  background: #262f29;
+  color: #e1e8de;
+  transition:
+    background 0.15s,
+    border-color 0.15s;
+}
+button:hover:not(:disabled),
+.button:hover {
+  background: #344236;
+  border-color: #71846c;
+}
+button:disabled {
+  opacity: 0.36;
+}
+button.primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #1c2b1b;
+}
+button.primary:hover:not(:disabled) {
+  background: #cce6c7;
+  border-color: #cce6c7;
+  color: #142413;
+}
+button.danger {
+  color: #f2b6ad;
+  border-color: #825047;
+  background: #262f29;
+}
+button.danger:hover:not(:disabled) {
+  background: #462e2a;
+}
+button.link {
+  background: none;
+  color: var(--accent);
+}
+button.link:hover:not(:disabled) {
+  background: none;
+}
+input,
+select {
+  background: #141b16;
+  border-color: #3b463d;
+  color: var(--ink);
+}
+input::placeholder {
+  color: #77877b;
+}
+input[type="checkbox"] {
+  accent-color: #a5d6b6;
+}
+:focus-visible {
+  outline-color: var(--accent);
+}
+
+/* Surfaces */
+.card {
+  background: var(--paper);
+  border-color: var(--line);
+}
+.tag {
+  border-color: #3c483e;
+  color: #9eaf96;
+}
+.tag.strong {
+  border-color: #3a4a34;
+  background: #3a4a34;
+  color: #def1d4;
+}
+.wordmark {
+  color: #c1deb7;
+}
+.label,
+.hint,
+small,
+.muted {
+  color: var(--muted);
+}
+
+/* Onboarding and login */
+.choice.primary span {
+  color: #1c2b1b;
+}
+.qr {
+  border-color: var(--line);
+  background: #fff;
+}
+
+/* Connect your robot */
+.robot-card {
+  background: #18211c;
+  border-color: #34463d;
+}
+.robot-card:hover:not(:disabled) {
+  background: #202e25;
+  border-color: #71846c;
+}
+.robot-card small.ok {
+  color: var(--accent);
+}
+.robot-picture {
+  border-color: #4c6243;
+  color: #a9bca1;
+}
+.add-robot {
+  border-top-color: var(--line);
+}
+
+/* Dialogs */
+.overlay {
+  background: #080e09b8;
+  backdrop-filter: blur(5px);
+}
+.dialog {
+  background: #212b20;
+  border-color: #4c6243;
+  box-shadow: 0 20px 100px #0006;
+}
+.found-card {
+  border-color: #9bccad;
+  background: #23382c;
+}
+@keyframes attention {
+  50% {
+    box-shadow: 0 0 0 6px #9bccad33;
+  }
+}
+.timer {
+  background: var(--soft);
+}
+.timer i {
+  background: var(--accent);
+}
+.steps li.done {
+  color: var(--accent);
+}
+
+/* Start Session */
+.segmented button {
+  background: #18211c;
+  border-color: #34463d;
+}
+.segmented button[aria-checked="true"] {
+  border-color: #9bccad;
+  background: #23382c;
+}
+.segmented small {
+  color: #a8b8b0;
+}
+.module-group h3 {
+  color: var(--muted);
+}
+.module-icons {
+  color: #a9bca1;
+}
+.modules li[data-tip]:hover::after,
+.modules li[data-tip]:focus-within::after {
+  background: #2a352b;
+  border: 1px solid #4c6243;
+  color: var(--ink);
+}
+.preview {
+  background: #101611;
+}
+.status-line {
+  color: var(--accent);
+}
+
+/* Session */
+.camera {
+  background: #101611;
+}
+.no-signal,
+.camera .no-signal {
+  color: #697b65;
+}
+.map {
+  background: #171e1a;
+}
+.session .bar .status {
+  color: #a3afa0;
+}
+.session .bar .status.online {
+  color: #c0dfb7;
+}
+.session .bar .status.reconnecting,
+.session .bar .status.connecting {
+  color: var(--amber);
+}
+.tabs [role="tab"] {
+  background: #151c16;
+  border-color: #3c493b;
+  color: #93a68b;
+}
+.tabs [role="tab"][aria-selected="true"] {
+  background: #3a4a34;
+  border-color: #3a4a34;
+  color: #def1d4;
+}
+.banner {
+  border-color: #73513a;
+  background: #382b21;
+  color: #eac2a2;
+}
+.pad button.on {
+  background: #3a4a34;
+  border-color: #71846c;
+  color: #def1d4;
+}
+.message small {
+  color: #9fb192;
+}
+.message.tool {
+  color: var(--muted);
+}
+.record.recording {
+  border-color: #716143;
+  background: #24291f;
+}
+.record.recording > svg {
+  color: var(--amber);
+}
+.record button.danger {
+  color: var(--amber);
+  border-color: #816a43;
+  background: #3a3220;
+}
+.numbers dt {
+  color: #91a187;
+}
+.list li {
+  border-bottom-color: #303b32;
+}
+
+/* Sidebar */
+.drawer {
+  background: #19201b;
+  border-right-color: #2e3930;
+}
+.spaces button[aria-pressed="true"] {
+  border-color: #9bccad;
+  background: #23382c;
+}
+
+/* Toasts */
+.toast {
+  background: #212b20;
+  border-color: #4c6243;
+  color: var(--ink);
+  box-shadow: 0 10px 40px #0006;
+}
+.toast.error {
+  background: #382b21;
+  border-color: #73513a;
+  color: #eac2a2;
+}
+
+/* Reused components */
+.humancli-tooltip {
+  background: #212b20;
+  border-color: #4c6243;
+  color: var(--ink);
+}
+.live-badge {
+  background: #000a;
+}
+
+/* Inter runs slightly wider than the wireframe's system font; keep this line on one row
+   so the side card keeps its height. */
+.status-line {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  letter-spacing: -0.3px;
+}

@@ -5,7 +5,9 @@
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import "../mock/mock.css";
+import "@fontsource-variable/inter";
 import "./flow.css";
+import "./flow-theme.css";
 import { DEFAULT_SCENARIO, MockBackend, type Scenario } from "../mock/backend";
 import { installFetch, installRobot, startLoops } from "../mock/install";
 import { mountPanel } from "../mock/Panel";

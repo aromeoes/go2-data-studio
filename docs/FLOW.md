@@ -1,7 +1,9 @@
 # UX flow prototype
 
-A wireframe of the redesigned app: flow, screens and components, without visual
-design. It runs on the mock backend (see [MOCK.md](MOCK.md)), so no robot,
+The redesigned app's flow, screens and components, styled with the current
+app's theme (colors, Inter, buttons and surfaces from `style.css`). The theme
+lives in `web/src/flow/flow-theme.css` and changes no sizes or spacing; layout
+is in `flow.css`. It runs on the mock backend (see [MOCK.md](MOCK.md)), so no robot,
 Python backend or account is needed.
 
 ```sh
@@ -73,4 +75,4 @@ The mock backend implements these; the Python backend does not yet.
   (`web/src/flow/modules.ts`).
 * Robot pictures are placeholders for the pixel-art versions.
 * Voice input is not simulated.
-* Visual design is not started.
+* The new visual design is not started; this uses the current app theme.
