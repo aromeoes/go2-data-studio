@@ -111,6 +111,8 @@ export class MockBackend {
   battery = 78;
   frozen = false;
   estop = false;
+  /** Movement toggle: the robot stays in place while true. */
+  hold = false;
   failNextUpload = false;
   failNextMap = false;
 
@@ -146,6 +148,9 @@ export class MockBackend {
   private agentSpace = "";
   private skill = { active: null as string | null, phase: "idle", message: "No skill running." };
   private eventId = 0;
+  private loadingUntil = 0;
+  private selectedModules: string[] = [];
+  private agentExplore = false;
 
   constructor(
     public scenario: Scenario = DEFAULT_SCENARIO,
@@ -350,7 +355,7 @@ export class MockBackend {
   private move(now: number, dt: number) {
     const before = this.pose;
     let { x, y, yaw } = before;
-    const halted = this.estop || this.frozen;
+    const halted = this.estop || this.frozen || this.hold;
     const autonomous =
       !halted && (this.mode === "explore" || this.mode === "agent" || this.replay);
     if (this.mode === "teleop" && !halted) {
@@ -397,7 +402,7 @@ export class MockBackend {
   }
 
   private plan() {
-    const exploring = this.mode === "explore" || this.replay;
+    const exploring = this.mode === "explore" || this.replay || this.agentExplore;
     if (!exploring && !this.patrol) return;
     const points = exploring
       ? world.routeToUnknown(this.pose, this.known)
@@ -441,9 +446,10 @@ export class MockBackend {
   }
 
   private cancelSkills(message: string) {
-    const running = !!this.route || this.patrol || this.skill.phase === "running";
+    const running = !!this.route || this.patrol || this.agentExplore || this.skill.phase === "running";
     this.route = null;
     this.patrol = false;
+    this.agentExplore = false;
     this.agent.busy = false;
     if (running && message) this.skill = { active: null, phase: "idle", message };
   }
@@ -489,7 +495,7 @@ export class MockBackend {
     if (this.session && !this.segment) this.newSegment();
   }
 
-  private connect(body: { ip?: string; robot_id?: string; segment_id?: string }) {
+  private connect(body: { ip?: string; robot_id?: string; segment_id?: string; profile?: SessionProfile }) {
     if (this.connection !== "offline") throw new MockError("Disconnect the current session first");
     if (body.segment_id) {
       const segment = this.find(this.segments, body.segment_id, "Recording");
@@ -510,7 +516,16 @@ export class MockBackend {
     this.ip = ip;
     this.kind = (saved?.kind as "go2" | "vector") || "go2";
     this.robotId = saved?.id || null;
-    this.profile = this.kind === "vector" ? { ...saved!.profile } : saved ? PREVIEW : LEGACY;
+    this.profile = body.profile
+      ? { preset: body.profile.preset, enabled: [...body.profile.enabled] }
+      : this.kind === "vector"
+        ? { ...saved!.profile }
+        : saved
+          ? PREVIEW
+          : LEGACY;
+    this.selectedModules = [];
+    this.hold = false;
+    if (!this.spaces.length) this.createSpace("Starting space");
     this.mode = "idle";
     this.estop = false;
     this.event(`Connecting to ${saved?.name || ip}`);
@@ -528,6 +543,8 @@ export class MockBackend {
     this.error = null;
     this.replay = false;
     this.profile = LEGACY;
+    this.selectedModules = [];
+    this.hold = false;
     this.event("Disconnected");
     return { ok: true };
   }
@@ -553,6 +570,39 @@ export class MockBackend {
     this.event(`Session started: ${catalog.presets.find((p) => p.id === body.preset)!.name}`);
     this.startRuntime(this.scenario.sessionSeconds);
     return { ok: true, profile: this.profile };
+  }
+
+  /**
+   * Adds modules to the running session without reconnecting the robot.
+   * Proposed API for the new flow; the Python backend does not have it yet.
+   */
+  private addModules(body: { robot_id: string | null; preset: string; enabled: string[]; modules: string[] }) {
+    if ((body.robot_id ?? null) !== this.robotId) throw new MockError("The selected robot changed. Go back and choose it again.");
+    this.requireOnline();
+    const catalog = this.kind === "vector" ? VECTOR_CATALOG : GO2_CATALOG;
+    for (const id of body.enabled) {
+      const capability = catalog.capabilities.find((c) => c.id === id);
+      if (!capability) throw new MockError(`${id} is not available on ${this.robotName}`);
+      const missing = capability.requires.filter((r) => !body.enabled.includes(r));
+      if (missing.length) throw new MockError(`${capability.name} requires ${missing.join(", ")}`);
+    }
+    this.profile = { preset: body.preset, enabled: [...body.enabled] };
+    this.selectedModules = [...body.modules];
+    this.loadingUntil = this.clock() + 2.5;
+    this.event(`Session started with ${body.modules.length} modules`);
+    return { ok: true, profile: this.profile };
+  }
+
+  createSpace(name: string) {
+    const space: Item = {
+      id: uid(),
+      name,
+      created: this.clock(),
+      status: "ready",
+      folder: `${STORAGE_ROOT}/${name.toLowerCase().replace(/\W+/g, "-")}`,
+    };
+    this.spaces.unshift(space);
+    return space;
   }
 
   private saveRobot(body: Partial<SavedRobot>, id?: string) {
@@ -791,7 +841,12 @@ export class MockBackend {
     const lower = text.toLowerCase();
     const tool = (name: string, detail: string) => this.say("tool", `${name}(${detail})`);
     if (this.kind === "vector") return "Scripted reply in mock mode. Vector skills are not simulated.";
+    const missing = (module: string) =>
+      this.selectedModules.length && !this.selectedModules.includes(module)
+        ? `${module} is not part of this session's blueprint.`
+        : "";
     let match = text.match(/(?:remember|tag|save) this (?:as|place as) (.+?)[.!]?$/i);
+    if (match && missing("NavigationSkillContainer")) return missing("NavigationSkillContainer");
     if (match) {
       if (!this.agentSpace) return "Select a space before tagging a location.";
       const name = match[1].trim();
@@ -814,8 +869,19 @@ export class MockBackend {
       this.skill = { active: null, phase: "idle", message: "Stopped." };
       return "Stopped. Go2 is holding position.";
     }
+    if (/explor/.test(lower)) {
+      if (!this.enabled("exploration")) return "WavefrontFrontierExplorer is not part of this session's blueprint.";
+      tool("begin_exploration", "");
+      this.patrol = false;
+      this.agentExplore = true;
+      this.route = null;
+      this.planAt = 0;
+      this.skill = { active: "begin_exploration", phase: "running", message: "Exploring unmapped areas." };
+      return "Exploring. I will keep driving to unmapped areas until you say stop.";
+    }
     if (/patrol/.test(lower)) {
       if (!this.enabled("navigation")) return "Navigation is disabled in this session.";
+      if (missing("PatrollingModule")) return missing("PatrollingModule");
       tool("start_patrol", "");
       this.patrol = true;
       this.route = null;
@@ -825,6 +891,7 @@ export class MockBackend {
     }
     match = text.match(/^(?:go|navigate|walk|take me) to (?:the )?(.+?)[.!]?$/i);
     if (match) {
+      if (missing("NavigationSkillContainer")) return missing("NavigationSkillContainer");
       const name = match[1].trim();
       const place = this.places.find((p) => p.space === this.agentSpace && p.name.toLowerCase() === name.toLowerCase());
       tool("navigate_with_text", `query="${name}"`);
@@ -859,12 +926,14 @@ export class MockBackend {
       this.navPhase = "route_ready";
       return `Moving ${Math.abs(reach).toFixed(1)} m ${reach < 0 ? "backward" : "forward"}.`;
     }
+    if (/follow/.test(lower) && missing("PersonFollowSkillContainer")) return missing("PersonFollowSkillContainer");
     if (/follow/.test(lower)) {
       tool("follow_person", `query="${text}"`);
       this.skill = { active: "follow_person", phase: "error", message: "No person matching the description is in view." };
       return "I could not find that person in the camera view. (Person following is not simulated.)";
     }
     match = text.match(/^say:?\s+(.+)$/i);
+    if (match && missing("SpeakSkill")) return missing("SpeakSkill");
     if (match) {
       tool("speak", `text="${match[1]}"`);
       this.skill = { active: "speak", phase: "done", message: "Audio upload acknowledged by Go2." };
@@ -892,7 +961,8 @@ export class MockBackend {
   }
 
   private navigation(now: number): NavigationInfo {
-    const active = this.mode === "explore" || (this.mode === "agent" && (!!this.route || this.patrol));
+    const active =
+      this.mode === "explore" || (this.mode === "agent" && (!!this.route || this.patrol || this.agentExplore));
     const phase = active ? this.navPhase : this.mode === "teleop" ? "teleop" : "paused";
     const [title, detail] = NAV_PHASES[phase];
     return {
@@ -938,6 +1008,24 @@ export class MockBackend {
     };
   }
 
+  private tools() {
+    const needs: Record<string, string> = {
+      tag_location: "NavigationSkillContainer",
+      list_locations: "NavigationSkillContainer",
+      navigate_with_text: "NavigationSkillContainer",
+      start_patrol: "PatrollingModule",
+      stop_patrol: "PatrollingModule",
+      follow_person: "PersonFollowSkillContainer",
+      stop_following: "PersonFollowSkillContainer",
+      speak: "SpeakSkill",
+      start_exploration: "WavefrontFrontierExplorer",
+      start_recording: "ConsoleBridge",
+      save_recording: "ConsoleBridge",
+    };
+    const chosen = this.selectedModules;
+    return AGENT_CAPABILITIES.filter((t) => !chosen.length || !needs[t.name] || chosen.includes(needs[t.name]));
+  }
+
   /** The /api/state payload. */
   snapshot(): State {
     const online = this.connection === "online";
@@ -965,9 +1053,12 @@ export class MockBackend {
       events: this.events,
       cloud: this.cloud,
       telemetry: online ? this.telemetry() : {},
+      loading_modules: this.clock() < this.loadingUntil,
+      selected_modules: this.selectedModules,
+      hold: this.hold,
       agent: {
         ...this.agent,
-        capabilities: this.kind === "go2" && this.enabled("humancli") ? AGENT_CAPABILITIES : [],
+        capabilities: this.kind === "go2" && this.enabled("humancli") ? this.tools() : [],
         vision: {
           configured: !!this.agent.model?.configured,
           enabled: !!this.agent.model?.vision,
@@ -1031,6 +1122,16 @@ export class MockBackend {
         return { source: "DimOS UnitreeSkillContainer", actions: UNITREE_ACTIONS };
       case "/connect":
         return this.connect(body);
+      case "/session/modules":
+        return this.addModules(body);
+      case "/hold":
+        this.requireOnline();
+        this.hold = !!body.on;
+        if (this.hold) this.leaveControl();
+        return { ok: true, hold: this.hold };
+      case "/cloud/signout":
+        this.signOut();
+        return { ok: true };
       case "/disconnect":
         return this.disconnect();
       case "/session/profile":
@@ -1079,9 +1180,7 @@ export class MockBackend {
       case "/spaces": {
         const name = (body.name || "").trim();
         if (!name) throw new MockError("Enter a space name");
-        const space: Item = { id: uid(), name, created: this.clock(), status: "ready", folder: `${STORAGE_ROOT}/${name.toLowerCase().replace(/\W+/g, "-")}` };
-        this.spaces.unshift(space);
-        return space;
+        return this.createSpace(name);
       }
       case "/import": {
         const space = this.find(this.spaces, body.space_id, "Space");
@@ -1096,7 +1195,7 @@ export class MockBackend {
       case "/maps":
         return this.generateMap(body);
       case "/cloud/login":
-        this.cloud.login = { url: `${CONSOLE_URL}/device?code=MOCK-7Q4K`, code: "MOCK-7Q4K", expires_at: this.clock() + 600 };
+        this.cloud.login = { url: `${CONSOLE_URL}/device?code=MOCK-7Q4K`, code: "MOCK-7Q4K", expires_at: this.clock() + 900 };
         this.cloud.error = null;
         return { ok: true };
       case "/cloud/refresh":

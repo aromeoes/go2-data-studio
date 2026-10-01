@@ -51,6 +51,10 @@ export type Grid = {
   received: number;
 };
 export type State = {
+  /** Proposed for the single-connection flow (mock backend only for now). */
+  loading_modules?: boolean;
+  selected_modules?: string[];
+  hold?: boolean;
   vector_services?: { state: string; message: string; host?: string | null; voice_ready?: boolean };
   robot_id?: string | null;
   robot_kind?: "go2" | "vector";

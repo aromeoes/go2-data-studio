@@ -102,7 +102,13 @@ export function returningUser(now: number): Seed {
 }
 
 /** A first launch: nothing saved yet. */
-export const firstRun = (): Seed => ({ robots: [], spaces: [], sessions: [], segments: [], maps: [] });
+export const firstRun = (): Seed => ({
+  robots: [],
+  spaces: [{ id: "space-starting", name: "Starting space", created: Date.now() / 1000, status: "ready", folder: `${STORAGE_ROOT}/starting-space` }],
+  sessions: [],
+  segments: [],
+  maps: [],
+});
 
 export const vectorReadings = (now: number) => ({
   received: now,

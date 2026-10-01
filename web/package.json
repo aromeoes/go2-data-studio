@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "vite --host 127.0.0.1",
     "mock": "vite --host 127.0.0.1 --port 8797 --open /mock.html",
+    "flow": "vite --host 127.0.0.1 --port 8798 --open /flow.html",
     "build": "tsc -b && vite build",
     "test": "vitest run src"
   },

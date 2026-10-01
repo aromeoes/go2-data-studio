@@ -103,7 +103,12 @@ export function startLoops(backend: MockBackend) {
     if (++beat % 2 && !changed) return;
     if (online && ctx && !backend.frozen && backend.profile.enabled.includes("camera")) {
       drawCamera(ctx, backend.pose);
-      canvas.toBlob((blob) => blob && backend.connection === "online" && setCamera(URL.createObjectURL(blob)), "image/jpeg", 0.7);
+      canvas.toBlob((blob) => {
+        if (!blob || backend.connection !== "online") return;
+        sdk.cameraFrames++;
+        sdk.cameraBytes += blob.size;
+        setCamera(URL.createObjectURL(blob));
+      }, "image/jpeg", 0.7);
     }
     if (online || changed) sdk.onChange();
   }, 100);

@@ -63,6 +63,11 @@ function Panel({
         </span>
         <span aria-hidden="true">{open ? "–" : "+"}</span>
       </button>
+      {backend.cloud.login && !open && (
+        <button className="mock-approve" onClick={() => set({ account: "signed-in" })}>
+          Approve cloud sign-in
+        </button>
+      )}
       {open && (
         <div className="mock-body">
           <p>Simulated backend, robot and cloud. Nothing leaves this page.</p>
@@ -74,7 +79,10 @@ function Panel({
               ["returning", "Returning user (robots, recordings)"],
               ["first-run", "First run (empty)"],
             ]}
-            onChange={(start) => set({ start })}
+            onChange={(start) => {
+              set({ start });
+              location.reload();
+            }}
           />
           <Choice
             label="DimOS Cloud account"
@@ -168,7 +176,7 @@ function Panel({
             Fail the next map generation
           </label>
           <div className="mock-row">
-            <button onClick={() => backend.reset()}>Reset all</button>
+            <button onClick={() => location.reload()}>Reset all</button>
             <button
               onClick={() =>
                 window.open(

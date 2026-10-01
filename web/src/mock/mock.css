@@ -112,3 +112,12 @@
 .mock-attention button {
   border-color: #e0a93a;
 }
+.mock-approve {
+  margin: 0 10px 10px;
+  padding: 6px 8px;
+  border: 1px solid #e0a93a;
+  border-radius: 5px;
+  background: #e0a93a;
+  color: #211b10;
+  cursor: pointer;
+}
