@@ -1,0 +1,4 @@
+{
+  "url": "http://127.0.0.1:8780",
+  "token_file": "/path/to/private/vector-wirepod-token"
+}

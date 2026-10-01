@@ -4,9 +4,10 @@ from pathlib import Path
 from unittest.mock import Mock
 
 import pytest
+import requests
 
 from go2_setup.catalog import Catalog, atomic_json
-from go2_setup.cloud import CloudBackups, CloudError, fingerprint
+from go2_setup.cloud import CloudBackups, CloudError, dataset_name, fingerprint
 from go2_setup.config import Settings
 
 
@@ -191,6 +192,11 @@ def test_signed_put_preserves_host_only_signature_without_extra_auth_headers(set
         == "etag"
     )
     headers = put.call_args.kwargs.get("headers", {})
+    # Streamed in small writes, with a fixed length for the presigned PUT.
+    body = put.call_args.kwargs["data"]
+    prepared = requests.Request("PUT", "https://bucket.s3.amazonaws.com/o", data=body).prepare()
+    assert prepared.headers["Content-Length"] == "4" and "Transfer-Encoding" not in prepared.headers
+    assert body.read() == b"part"
     assert "Authorization" not in headers
     assert "Content-MD5" not in headers
     assert put.call_args.kwargs["allow_redirects"] is False
@@ -276,6 +282,23 @@ def test_s3_permanent_rejection_is_not_retried_and_is_redacted(setup, monkeypatc
     put.assert_called_once()
 
 
+def test_connection_drops_are_retried_and_logged_without_secrets(setup, monkeypatch, caplog):
+    import requests
+
+    cloud, _, _ = setup
+    waits = []
+    cloud.stop.wait = lambda seconds: waits.append(seconds) or False
+    secret = "https://bucket.s3.amazonaws.com/object?X-Amz-Signature=secret"
+    failure = requests.ConnectionError(f"Max retries exceeded with url: /object?X-Amz-Signature=secret {secret}")
+    put = Mock(side_effect=failure)
+    monkeypatch.setattr("go2_setup.cloud.requests.put", put)
+    with pytest.raises(CloudError, match="connection failed"):
+        cloud._put(secret, b"part")
+    assert put.call_count == 6 and waits == [1, 2, 4, 8, 16]
+    assert "Cloud part upload attempt 6 failed: ConnectionError" in caplog.text
+    assert "secret" not in caplog.text and "X-Amz" not in caplog.text
+
+
 def test_streamed_download_verifies_actual_bytes_and_rejects_corruption(setup, monkeypatch):
     cloud, _, _ = setup
     expected = hashlib.sha256(b"firstsecond").hexdigest()
@@ -300,3 +323,61 @@ def test_unverified_remote_bytes_never_reach_complete(setup):
     cloud._verify_download.side_effect = None
     assert run(cloud, segment)["status"] == "complete"
     assert remote.sent == [1, 2, 3]
+
+
+def test_named_upload_keeps_name_on_resume_and_preserves_local_file(setup):
+    cloud, catalog, segment = setup
+    remote = Remote(cloud)
+    cloud.request, cloud._put = remote.request, remote.put
+    remote.fail_part = 2
+    before = fingerprint(segment["path"])
+    cloud.start(segment["id"], name="  Office west wing  ")
+    cloud.worker.join(10)
+    assert not cloud.worker.is_alive()
+    assert remote.upload["filename"] == "Office west wing.db"
+    assert remote.upload["manifest"]["dataset_name"] == "Office west wing"
+    assert catalog.get(segment["id"])["backup"]["name"] == "Office west wing"
+    with pytest.raises(CloudError, match="existing name"):
+        cloud.start(segment["id"], name="Different name")
+    remote.fail_part = None
+    backup = run(cloud, segment)
+    assert backup["status"] == "complete"
+    assert backup["name"] == "Office west wing"
+    assert remote.upload["filename"] == "Office west wing.db"
+    assert fingerprint(segment["path"]) == before
+
+
+@pytest.mark.parametrize(
+    "name", ["", "  ", "../office", "room\\file", "a" * 121, "x\nroom", "..", "🌏" * 60]
+)
+def test_invalid_dataset_names(name):
+    with pytest.raises(CloudError):
+        dataset_name(name)
+
+
+def test_legacy_upload_resumes_with_original_filename(setup):
+    cloud, catalog, segment = setup
+    catalog.update(segment["id"], backup={"status": "paused", "upload_id": "upload"})
+    remote = Remote(cloud)
+    cloud.request, cloud._put = remote.request, remote.put
+    assert run(cloud, segment)["status"] == "complete"
+    assert remote.upload["filename"] == f"go2-{segment['id']}.db"
+
+
+def test_deduplicated_upload_displays_actual_cloud_name(setup):
+    cloud, catalog, segment = setup
+    remote = Remote(cloud)
+
+    def request(method, path, **kwargs):
+        result = remote.request(method, path, **kwargs)
+        if path.endswith("/download"):
+            result["filename"] = "Previously backed up.db"
+        return result
+
+    cloud.request, cloud._put = request, remote.put
+    cloud.start(segment["id"], name="New label")
+    cloud.worker.join(10)
+    backup = catalog.get(segment["id"])["backup"]
+    assert backup["status"] == "complete"
+    assert backup["name"] == "Previously backed up"
+    assert backup["filename"] == "Previously backed up.db"

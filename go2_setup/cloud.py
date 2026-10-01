@@ -7,9 +7,12 @@ includes committed WAL data; raw recordings are never modified or removed.
 from __future__ import annotations
 
 import hashlib
+import io
 import json
+import logging
 import os
 from pathlib import Path
+from datetime import datetime, timezone
 import shutil
 import sqlite3
 import threading
@@ -23,10 +26,13 @@ import requests
 from go2_setup.catalog import atomic_json
 from go2_setup.records import inspect_recording
 
+log = logging.getLogger(__name__)
+
 API = "https://api.dimensional.org"
 CONSOLE = "https://console.dimensional.org"
 ACTIVE = {"preparing", "uploading", "verifying"}
 PART_SIZE = 16 * 1024 * 1024
+PART_ATTEMPTS = 6
 
 
 class CloudError(ValueError):
@@ -35,6 +41,19 @@ class CloudError(ValueError):
 
 class Paused(Exception):
     pass
+
+
+def dataset_name(value):
+    if not isinstance(value, str):
+        raise CloudError("Enter a dataset name.")
+    name = value.strip()
+    if not name or len(name) > 120 or len(name.encode("utf-8")) > 200:
+        raise CloudError("Use a dataset name between 1 and 120 characters (up to 200 UTF-8 bytes).")
+    if name in {".", ".."} or any(ord(c) < 32 or c in '/\\<>:"|?*' for c in name):
+        raise CloudError(
+            "Use a dataset name without slashes, control characters or filename punctuation."
+        )
+    return name
 
 
 def fingerprint(path):
@@ -168,9 +187,7 @@ class CloudBackups:
                 raise CloudError("Pause the upload before changing cloud accounts.")
             if self.login_worker and self.login_worker.is_alive():
                 return self.status()
-            d = self.request(
-                "POST", "/auth/device", auth=False, params={"label": "Go2 Space Setup"}
-            )
+            d = self.request("POST", "/auth/device", auth=False, params={"label": "DIMENSIONAL"})
             url = d.get("verification_uri_complete", d["verification_uri"])
             parsed = urlparse(url)
             if parsed.scheme != "https" or parsed.hostname != "console.dimensional.org":
@@ -181,6 +198,19 @@ class CloudBackups:
             self.error = None
             self.login_worker = threading.Thread(target=self._login, args=(d,), daemon=True)
             self.login_worker.start()
+            return self.status()
+
+    def sign_out(self):
+        """Forget this device's DimOS Cloud key. Local recordings and backup badges stay."""
+        with self.lock:
+            if self.active:
+                raise CloudError("Pause the upload before signing out.")
+            if os.environ.get("DIMOS_API_KEY"):
+                raise CloudError("This device is signed in through DIMOS_API_KEY. Remove it to sign out.")
+            self.stop.set()
+            self.credentials.unlink(missing_ok=True)
+            self.account = self.quota = self.login = self.error = None
+            self.stop = threading.Event()
             return self.status()
 
     def _login(self, device):
@@ -213,7 +243,7 @@ class CloudBackups:
             self.catalog.update(ident, backup=b)
             return b
 
-    def start(self, ident):
+    def start(self, ident, name=None):
         with self.lock:
             if self.active:
                 raise CloudError("Another dataset is uploading. Pause it or wait for completion.")
@@ -226,9 +256,33 @@ class CloudBackups:
                 raise CloudError("Save the recording before uploading.")
             if not Path(segment["path"]).is_file():
                 raise CloudError("The recording file is missing.")
+            old = segment.get("backup", {})
+            saved_name = old.get("name") or (f"go2-{ident}" if old.get("upload_id") else None)
+            chosen_name = dataset_name(name) if name is not None else saved_name
+            if old.get("upload_id") and chosen_name != saved_name:
+                raise CloudError(
+                    "This upload already has a name. Resume it with its existing name."
+                )
+            if not chosen_name:
+                stamp = datetime.fromtimestamp(segment["created"], timezone.utc).strftime(
+                    "%Y-%m-%d %H-%M"
+                )
+                chosen_name = dataset_name(f"Go2 recording {stamp} {ident[:6]}")
+            filename = old.get("filename") if old.get("upload_id") else None
+            filename = filename or (
+                chosen_name if chosen_name.lower().endswith(".db") else chosen_name + ".db"
+            )
             self.active = ident
             self.pause.clear()
-            b = self.save(ident, status="preparing", error=None, percent=0)
+            b = self.save(
+                ident,
+                status="preparing",
+                error=None,
+                percent=0,
+                name=chosen_name,
+                filename=filename,
+            )
+            segment = {**segment, "backup": b}
             self.worker = threading.Thread(target=self._run, args=(segment,), daemon=True)
             self.worker.start()
             return b
@@ -302,15 +356,19 @@ class CloudBackups:
     def _put(self, url, data):
         self.storage_url(url)
         error = "Cloud storage is unreachable. Resume to retry missing parts."
-        for attempt in range(3):
+        # Wi-Fi stalls are common on robots' networks: retry a part for about half a minute.
+        for attempt in range(PART_ATTEMPTS):
             self.check()
             try:
                 # Use the presigned request as issued. Adding Content-MD5 to a
                 # host-only signature causes S3 to reject it as an unsigned header.
                 # Verify the completed object's SHA-256 through a signed GET below.
+                # Send from a file object, not one 16 MB bytes block: urllib3 applies the
+                # connect timeout to each send, and a whole part cannot cross a slow
+                # uplink in 10 s. Content-Length is still set, as presigned S3 requires.
                 with requests.put(
                     url,
-                    data=data,
+                    data=io.BytesIO(data),
                     timeout=(10, 90),
                     allow_redirects=False,
                 ) as response:
@@ -321,9 +379,12 @@ class CloudBackups:
                     error = self.storage_error(response)
                     if response.status_code != 429 and response.status_code < 500:
                         raise CloudError(error)
-            except requests.RequestException:
+            except requests.RequestException as exc:
                 error = "Cloud storage connection failed. Resume to retry missing parts."
-            if self.stop.wait(attempt + 1):
+                # The exception text can contain the presigned URL and its signature.
+                reason = re.sub(r"https?://\S+|url: \S+|X-Amz-\S+", "<redacted>", str(exc))[:300]
+                log.warning("Cloud part upload attempt %d failed: %s: %s", attempt + 1, type(exc).__name__, reason)
+            if attempt + 1 < PART_ATTEMPTS and self.stop.wait(min(2**attempt, 16)):
                 self.check()
         raise CloudError(error)
 
@@ -362,6 +423,7 @@ class CloudBackups:
             stats = inspect_recording(path)
             session = self.catalog.get(segment["parent"], "session")
             manifest = dict(
+                dataset_name=segment["backup"]["name"],
                 streams=[dict(topic=name, **values) for name, values in stats["streams"].items()],
                 segment_id=ident,
                 session_id=session["id"],
@@ -385,7 +447,7 @@ class CloudBackups:
                 "POST",
                 "/v1/data/uploads",
                 json=dict(
-                    filename=f"go2-{ident}.db",
+                    filename=segment["backup"]["filename"],
                     kind="recording",
                     size=size,
                     sha256=sha,
@@ -436,6 +498,10 @@ class CloudBackups:
             if proof["sha256"] != sha:
                 raise CloudError("Cloud checksum metadata does not match this dataset.")
             self._verify_download(proof["url"], sha)
+            if proof.get("filename") and proof["filename"] != segment["backup"]["filename"]:
+                self.save(
+                    ident, name=proof["filename"].removesuffix(".db"), filename=proof["filename"]
+                )
             if fingerprint(segment["path"]) != source_fp:
                 raise CloudError(
                     "Local recording changed. Upload again to back up the current version."

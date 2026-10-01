@@ -1,0 +1,83 @@
+{
+  "name": "go2-data-studio-desktop",
+  "version": "0.3.0",
+  "private": true,
+  "description": "DIMENSIONAL desktop robot workspace",
+  "main": "main.cjs",
+  "scripts": {
+    "start": "electron .",
+    "test": "node --test test/*.test.cjs",
+    "package:mac": "electron-builder --mac dmg --arm64",
+    "package:linux": "electron-builder --linux dir --x64",
+    "package:mac:dir": "electron-builder --mac dir --arm64"
+  },
+  "devDependencies": {
+    "electron": "44.4.5",
+    "electron-builder": "26.15.3"
+  },
+  "build": {
+    "appId": "com.go2datastudio.desktop",
+    "productName": "DIMENSIONAL",
+    "files": [
+      "main.cjs",
+      "backend.cjs",
+      "package.json",
+      "permissions.cjs"
+    ],
+    "extraResources": [
+      {
+        "from": "../go2_setup",
+        "to": "app/go2_setup",
+        "filter": [
+          "**/*",
+          "!**/__pycache__/**"
+        ]
+      },
+      {
+        "from": "../web/dist",
+        "to": "app/web/dist"
+      },
+      {
+        "from": "../vendor/dimos-web",
+        "to": "app/vendor/dimos-web"
+      },
+      {
+        "from": "licenses",
+        "to": "licenses"
+      }
+    ],
+    "mac": {
+      "category": "public.app-category.utilities",
+      "icon": "assets/icon.icns",
+      "extraResources": [
+        {
+          "from": "runtime",
+          "to": "runtime"
+        }
+      ],
+      "extendInfo": {
+        "NSLocalNetworkUsageDescription": "DIMENSIONAL connects to your Go2 or Anki Vector on the local Wi-Fi network to show sensors, control movement and record maps.",
+        "NSMicrophoneUsageDescription": "Hold the talk button to send your spoken instruction to HumanCLI using OpenAI transcription."
+      }
+    },
+    "linux": {
+      "category": "Utility",
+      "icon": "assets/icon.png",
+      "executableName": "go2-data-studio",
+      "extraResources": [
+        {
+          "from": "runtime",
+          "to": "runtime"
+        }
+      ],
+      "target": [
+        "dir"
+      ]
+    },
+    "dmg": {
+      "title": "DIMENSIONAL",
+      "artifactName": "DIMENSIONAL-${version}-${arch}.${ext}"
+    },
+    "beforePack": "verify-package.cjs"
+  }
+}

@@ -5,6 +5,7 @@ requires-python = ">=3.12"
 dependencies = ["fastapi>=0.129", "uvicorn>=0.40", "requests>=2.32", "pydantic>=2.12", "python-dotenv>=1.2"]
 
 [project.optional-dependencies]
+vector = ["wirepod-vector-sdk==0.8.1"]
 anthropic = ["langchain-anthropic"]
 google = ["langchain-google-genai"]
 ollama = ["langchain-ollama"]

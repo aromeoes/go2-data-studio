@@ -27,7 +27,8 @@ from dimos.navigation.frontier_exploration.wavefront_frontier_goal_selector impo
     WavefrontFrontierExplorer,
 )
 
-from go2_setup.control import Authority, bounded_velocity
+from go2_setup.control import Authority, bounded_velocity, go2_sensor_recent
+from go2_setup.profiles import from_env, enabled, require
 from go2_setup.lidar_startup import enable_lidar, subscribe_lidar_status
 from go2_setup.motion_transport import install_velocity_transport
 
@@ -63,6 +64,7 @@ class PassiveGo2Connection(GO2Connection):
     @rpc
     def start(self) -> None:
         Module.start(self)
+        session_profile = from_env()
         self._camera_done = threading.Event()
         self._battery = {"percent": None, "received": None}
         self._sensor_health = {}
@@ -84,18 +86,22 @@ class PassiveGo2Connection(GO2Connection):
             ),
         }
         self.connection.start()
-        self._subscribe_sensor("lidar", self.connection.lidar_stream(), self.lidar.publish)
+        if enabled(session_profile, "lidar"):
+            self._subscribe_sensor("lidar", self.connection.lidar_stream(), self.lidar.publish)
         self._subscribe_sensor("odom", self.connection.odom_stream(), self._publish_tf)
         self._subscribe_sensor("lowstate", self.connection.lowstate_stream(), self._on_lowstate)
         self.register_disposable(Disposable(self.cmd_vel.subscribe(self._receive_velocity)))
-        self._subscribe_sensor(
-            "color_image", self.connection.video_stream(), self.color_image.publish
-        )
+        if enabled(session_profile, "camera"):
+            self._subscribe_sensor(
+                "color_image", self.connection.video_stream(), self.color_image.publish
+            )
 
         status_subscription = subscribe_lidar_status(self.connection, self._on_lidar_status)
         if status_subscription is not None:
             self.register_disposable(status_subscription)
         try:
+            # Keep the established sensor startup for onboard localization.
+            # The profile controls app consumption, never LiDAR power.
             if enable_lidar(self.connection):
                 self._lidar_enable["requested"] = time.time()
         except Exception as error:
@@ -103,7 +109,8 @@ class PassiveGo2Connection(GO2Connection):
 
         def camera_info_loop():
             while not self._camera_done.wait(1):
-                self.camera_info.publish(self.camera_info_static.with_ts(time.time()))
+                if enabled(session_profile, "camera"):
+                    self.camera_info.publish(self.camera_info_static.with_ts(time.time()))
 
         threading.Thread(target=camera_info_loop, daemon=True).start()
 
@@ -194,22 +201,27 @@ class PassiveGo2Connection(GO2Connection):
 
 
 class ControlGate(Module):
+    hold = False  # Movement toggle; see set_hold.
     global_costmap: In[OccupancyGrid]
     lidar: In[PointCloud2]
     nav_cmd_vel: In[Twist]
     tele_cmd_vel: In[Twist]
     odom: In[PoseStamped]
     cmd_vel: Out[Twist]
+    teleop_requested: Out[Twist]
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
+        self.profile = from_env()
         self.authority = Authority()
         self.last_odom = 0.0
         self.last_lidar = 0.0
         self.last_map = 0.0
         self.last_teleop = 0.0
         self.done = threading.Event()
-        self.navigation_enabled = True
+        self.navigation_enabled = False
+        # Movement toggle: while held, no teleop or navigation velocity reaches the robot.
+        self.hold = False
         self.nav_received = 0
         self.nav_forwarded = 0
         self.last_nav = None
@@ -250,8 +262,12 @@ class ControlGate(Module):
             }
             if (
                 self.navigation_enabled
+                and not self.hold
+                and enabled(self.profile, "navigation")
                 and self.authority.valid(self.authority.epoch, {"explore", "agent"})
-                and time.monotonic() - self.last_odom < 1
+                and go2_sensor_recent(self.last_odom, time.monotonic())
+                and go2_sensor_recent(self.last_lidar, time.monotonic())
+                and go2_sensor_recent(self.last_map, time.monotonic())
             ):
                 x, y, yaw = bounded_velocity(msg.linear.x, msg.linear.y, msg.angular.z)
                 self.cmd_vel.publish(Twist((x, y, 0), (0, 0, yaw)))
@@ -262,12 +278,15 @@ class ControlGate(Module):
             with self.authority.lock:
                 if self.authority.mode != "idle" and (
                     not self.authority.valid(self.authority.epoch, {"teleop", "explore", "agent"})
-                    or time.monotonic() - self.last_odom > 1
+                    or not go2_sensor_recent(self.last_odom, time.monotonic())
                     or (
-                        self.authority.mode in {"explore", "agent"}
+                        (
+                            self.authority.mode == "explore"
+                            or (self.authority.mode == "agent" and self.navigation_enabled)
+                        )
                         and (
-                            time.monotonic() - self.last_lidar > 1.5
-                            or time.monotonic() - self.last_map > 5
+                            not go2_sensor_recent(self.last_lidar, time.monotonic())
+                            or not go2_sensor_recent(self.last_map, time.monotonic())
                         )
                     )
                 ):
@@ -276,7 +295,7 @@ class ControlGate(Module):
                         if not self.authority.valid(
                             self.authority.epoch, {"teleop", "explore", "agent"}
                         )
-                        else "Control stopped because recent position, LiDAR, or map data is missing"
+                        else "Control stopped because position, LiDAR, or map data is missing or over 10 seconds old"
                     )
                     self.authority.halt()
                     self.cmd_vel.publish(Twist())
@@ -288,14 +307,36 @@ class ControlGate(Module):
         with self.authority.lock:
             if not self.authority.valid(epoch, {"agent"}):
                 return False
+            if enabled:
+                require(self.profile, "navigation")
+                if (
+                    not go2_sensor_recent(self.last_lidar, time.monotonic())
+                    or not go2_sensor_recent(self.last_map, time.monotonic())
+                    or not go2_sensor_recent(self.last_odom, time.monotonic())
+                ):
+                    raise ValueError("Wait for recent position, LiDAR and map data")
             self.navigation_enabled = enabled
             self.cmd_vel.publish(Twist())
             return True
 
     @rpc
+    def skill_velocity(self, epoch: int, x: float, y: float, yaw: float) -> bool:
+        with self.authority.lock:
+            if not self.authority.valid(epoch, {"agent"}) or not self.navigation_enabled:
+                return False
+            before = self.nav_forwarded
+            self._nav(Twist((x, y, 0), (0, 0, yaw)))
+            return self.nav_forwarded > before
+
+    @rpc
     def switch(self, mode: str) -> int:
         with self.authority.lock:
-            self.navigation_enabled = True
+            capability = {"teleop": "teleop", "explore": "exploration", "agent": "humancli"}.get(
+                mode
+            )
+            if capability:
+                require(self.profile, capability)
+            self.navigation_enabled = mode == "explore"
             self.cmd_vel.publish(Twist())
             self.stop_reason = None
             return self.authority.transition(mode)
@@ -308,6 +349,19 @@ class ControlGate(Module):
             return token
 
     @rpc
+    def set_profile(self, config: dict) -> None:
+        """Session modules were added to the running connection."""
+        with self.authority.lock:
+            self.profile = config
+
+    @rpc
+    def set_hold(self, on: bool) -> None:
+        with self.authority.lock:
+            self.hold = bool(on)
+            if self.hold:
+                self.cmd_vel.publish(Twist())
+
+    @rpc
     def clear(self) -> None:
         self.authority.clear()
 
@@ -318,9 +372,16 @@ class ControlGate(Module):
     @rpc
     def teleop(self, epoch: int, x: float, y: float, yaw: float) -> bool:
         with self.authority.lock:
-            if not self.authority.valid(epoch, {"teleop"}) or time.monotonic() - self.last_odom > 1:
+            bounded = bounded_velocity(x, y, yaw)
+            self.teleop_requested.publish(Twist((x, y, 0), (0, 0, yaw)))
+            if (
+                not enabled(self.profile, "teleop")
+                or self.hold
+                or not self.authority.valid(epoch, {"teleop"})
+                or not go2_sensor_recent(self.last_odom, time.monotonic())
+            ):
                 return False
-            x, y, yaw = bounded_velocity(x, y, yaw)
+            x, y, yaw = bounded
             self.last_teleop = time.monotonic()
             self.cmd_vel.publish(Twist((x, y, 0), (0, 0, yaw)))
             return True
@@ -336,6 +397,7 @@ class ControlGate(Module):
             nav_forwarded=self.nav_forwarded,
             last_nav=self.last_nav,
             stop_reason=self.stop_reason,
+            hold=self.hold,
         )
 
     @rpc
@@ -347,6 +409,8 @@ class ControlGate(Module):
 
 class ConsoleBridge(Module):
     dedicated_worker = True
+    teleop_requested: In[Twist]
+    cmd_vel: In[Twist]
     lidar: In[PointCloud2]
     color_image: In[Image]
     camera_info: In[CameraInfo]
@@ -366,7 +430,7 @@ class ConsoleBridge(Module):
     @rpc
     def start(self):
         super().start()
-        for name in ("lidar", "color_image", "camera_info", "odom", "tf"):
+        for name in ("lidar", "color_image", "camera_info", "odom", "tf", "teleop_requested", "cmd_vel"):
             self.register_disposable(
                 Disposable(
                     getattr(self, name).subscribe(lambda msg, name=name: self._sensor(name, msg))
@@ -400,7 +464,9 @@ class ConsoleBridge(Module):
                 self.writer.enqueue(
                     name,
                     record_msg,
-                    self.latest_pose if name in {"lidar", "odom", "color_image"} else None,
+                    self.latest_pose
+                    if name in {"lidar", "odom", "color_image", "teleop_requested", "cmd_vel"}
+                    else None,
                 )
             if name == "color_image" and time.monotonic() - self.last_preview > 0.4:
                 self.last_preview = time.monotonic()
@@ -436,7 +502,12 @@ class ConsoleBridge(Module):
             return {**self.telemetry, "recording": self.writer.state() if self.writer else None}
 
     @rpc
+    def set_profile(self, config: dict) -> None:
+        self.profile = config
+
+    @rpc
     def begin_recording(self, path: str) -> dict:
+        require(getattr(self, "profile", None) or from_env(), "recording")
         with self.lock:
             if self.writer:
                 raise ValueError("A recording is already active")
@@ -480,7 +551,7 @@ class SessionWriter:
         if self.closed or self.error:
             return
         try:
-            self.queue.put_nowait((name, msg, pose))
+            self.queue.put_nowait((name, msg, pose, time.time()))
         except queue.Full:
             self.dropped += 1
 
@@ -495,18 +566,21 @@ class SessionWriter:
                 "tf": TFMessage,
                 "color_image": Image,
                 "camera_info": CameraInfo,
+                "teleop_requested": Twist,
+                "cmd_vel": Twist,
             }
             streams = {name: store.stream(name, typ) for name, typ in types.items()}
             self.ready.set()
             while (item := self.queue.get()) is not None:
-                name, msg, pose = item
+                name, msg, pose, received_ts = item
                 stamp = (
                     msg.transforms[0].ts
                     if name == "tf" and msg.transforms
                     else getattr(msg, "ts", None)
                 )
                 streams[name].append(
-                    msg, ts=stamp or time.time(), pose=pose, tags={"reception_ts": time.time()}
+                    msg, ts=stamp if stamp is not None else received_ts,
+                    pose=pose, tags={"reception_ts": received_ts}
                 )
                 self.counts[name] = self.counts.get(name, 0) + 1
         except Exception as error:

@@ -22,7 +22,7 @@ navigation reliability or readiness for unattended operation.
   pose metadata compatibility with map jobs. Changing the recorder alone is not
   evidence that recording interruptions or movement slowdown are fixed.
 * Navigation already uses the DimOS planner, costmap and frontier explorer.
-  Preserve control authority, cancellation, stale-sensor checks and posture
+  Preserve control authority, cancellation, stale-sensor checks and stop
   guards when adopting further upstream components.
 * Validate the selected HumanCLI provider/model and physical operation with an
   operator present before activating updates on a robot.

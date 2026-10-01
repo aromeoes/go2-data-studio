@@ -5,7 +5,6 @@ LEGACY = {
     "Falta encabezado de la consola local": "Local console request header is missing",
     "Sin cámara": "No camera available",
     "No se reproduce una grabación abierta": "Save the recording before replaying it",
-    "Antes de desconectar, acostá el Go2 y confirmá visualmente que está apoyado": "Before disconnecting, lie Go2 down and visually confirm it is supported",
     "Detené el movimiento antes de confirmar la desconexión": "Stop movement before confirming disconnection",
     "Go2 desconectado": "Go2 disconnected",
     "Go2 conectado": "Go2 connected",

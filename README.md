@@ -1,14 +1,18 @@
-# Go2 Data Studio
+# DIMENSIONAL
 
 A local web application for connecting a Unitree Go2, recording spaces, generating maps, and backing up datasets to DimOS Cloud.
 
 The custom interface uses the DimOS Web SDK. DimOS provides robot connectivity, mapping, A* navigation, frontier exploration, SQLite storage and the MCP agent behind HumanCLI. The upstream Cockpit interface is not launched.
 
+## Desktop applications
+
+The Apple Silicon Mac and Steam Deck Electron apps include Python, DimOS, robot and mapping dependencies, and the Web SDK relay. Each device runs independently. Open the Mac app from Applications or the Deck app from Steam. See [Mac installation](docs/MAC.md), [Steam Deck installation and controls](docs/STEAM-DECK.md), and [desktop lifecycle](docs/DESKTOP.md).
+
 ## Features
 
 * Teleoperation with W/S for forward/backward, A/D for turning, and Q/E for sideways movement.
 * Switching between Teleop, autonomous exploration and HumanCLI, with control leases and sensor freshness checks.
-* LiDAR, camera, odometry, transforms and camera calibration recording, organized into spaces and segments.
+* LiDAR, camera, odometry, transforms, camera calibration and Go2 velocity-command recording, organized into spaces and segments.
 * Recording size, sensor health, battery and navigation status in the dashboard.
 * Versioned map generation, quality statistics and Rerun inspection.
 * DimOS Cloud upload progress, pause/resume and persistent backup status.
@@ -16,7 +20,7 @@ The custom interface uses the DimOS Web SDK. DimOS provides robot connectivity, 
 
 ## Requirements
 
-This is a source checkout application, initially developed and tested on macOS. Finder, Terminal launchers and local viewer integration are macOS-specific. Linux and Windows operation has not been validated.
+The requirements below apply to source development. The Mac and Steam Deck applications bundle their runtimes. Windows operation has not been validated.
 
 You need:
 
@@ -74,19 +78,21 @@ Create a space, connect the robot, wait for sensors, and start recording. Changi
 
 Generate a map from a saved segment while navigation is paused. Map jobs use DimOS commands and preserve separate versions. PointCloud2 output and Rerun inspection files can be opened from the application. Quality statistics report measured frame/pose coverage and gaps; they do not establish absolute map accuracy. Multi-segment map alignment and patrol configuration are not implemented.
 
+Go2 recordings also include `teleop_requested` (requested body-frame velocity before control checks and limits) and `cmd_vel` (final velocity published to the connection, including autonomous commands and zero-velocity stops). Both store forward/lateral velocity in m/s, yaw rate in rad/s, reception timestamps and the latest available pose. These are velocity commands, not raw keyboard/gamepad events or proof of robot execution. Older recordings are unchanged.
+
 Recordings use the official DimOS SqliteStore. The application currently owns the recording queue and segment lifecycle; replacing that adapter with the standard recorder is follow-up work.
 
 ## Cloud backups
 
-Choose **Connect DimOS Cloud**, complete sign-in, then **Upload dataset** on a segment. The application snapshots the SQLite database, uploads through the official Cloud API, and downloads the stored object as a stream to verify its SHA-256 before marking it **Backed up**. Verification adds download traffic. Preparing the snapshot needs approximately one extra recording-size of disk space plus 1 GB headroom.
+Choose **Connect DimOS Cloud**, complete sign-in, then **Upload dataset** on a segment. Edit the suggested dataset name and choose **Start upload**. Each segment has its own name, saved in the cloud filename and dataset metadata and shown beside progress and the backup badge. Resuming an existing upload retains its name; local recording paths remain unchanged. If Cloud deduplicates against an existing backup, the confirmed cloud filename is shown. The application snapshots the SQLite database, uploads through the official Cloud API, and downloads the stored object as a stream to verify its SHA-256 before marking it **Backed up**. Verification adds download traffic. Preparing the snapshot needs approximately one extra recording-size of disk space plus 1 GB headroom.
 
 Uploads contain uncompressed recording databases, not generated maps. Local originals remain in place. Completed parts can be resumed, and backup badges are reconciled with the remote account and local data. The current HTTP client is custom; migrating to the official CloudData Python client is tracked in [follow-up work](docs/CHECKPOINT.md).
 
 ## Operating and restarting
 
-Physical operation requires supervision. Before a planned disconnect or software restart, stop movement, have the operator request lie-down, visually confirm the robot is lying down and supported, save the recording and use the guarded disconnect flow. An API acknowledgment does not establish posture. See [AGENTS.md](AGENTS.md).
+Physical operation requires supervision. Before a planned disconnect or software restart, stop movement, save the recording and use End session. Session setup and disconnect do not require posture validation. See [AGENTS.md](AGENTS.md).
 
-The Stop control is a software stop, not an electrical emergency stop. Network failure, firmware faults or power loss cannot guarantee a controlled posture. Do not automatically reconnect after a fall. Publishing this source does not validate unattended operation.
+Stop (Space or controller B) is a software stop, not an electrical emergency stop. Network failure, firmware faults or power loss cannot guarantee a controlled posture. Do not automatically reconnect after a fall. Publishing this source does not validate unattended operation.
 
 ## Validation
 
@@ -106,3 +112,30 @@ npm run build
 ## Third-party code
 
 The official DimOS Web SDK and relay snapshot is retained under `vendor/dimos-web`, including its upstream license and provenance manifest. Cockpit source files are included in that unmodified snapshot but are not used as this application's frontend. Run `scripts/verify_sdk_vendor.py` to check the snapshot.
+
+
+### Voice instructions and phone sign-in
+
+Select Controller input and hold **R1** (right bumper) to speak into the computer's microphone. You can also hold the microphone button with a mouse/touch, or focus it and hold Space. Wait for “Listening”, speak, then release to send. The app pauses Teleop/exploration and uses the existing HumanCLI agent. It does not resume Teleop automatically. L1 is still hold-to-drive; B remains Stop in controller mode.
+
+Voice uses the locally saved HumanCLI OpenAI key with the default OpenAI endpoint and `gpt-4o-mini-transcribe`. Recordings are limited to 30 seconds / 2 MB, kept in memory, and sent to OpenAI only on release. The recognized text appears in HumanCLI. Silence, Escape, Cancel voice, focus loss, controller loss, expired control authority, or B discard pending input. An already submitted instruction follows the existing HumanCLI cancellation and robot stop controls. Replies remain text. Other HumanCLI model providers still work for typed input; this first voice adapter requires OpenAI.
+
+On macOS, allow microphone access when prompted. On Steam Deck, use the built-in microphone and the standard gamepad layout. Microphone access is restricted to the app's own page; camera capture is not enabled.
+
+Click **Connect DimOS Cloud** and scan the QR code with your phone. Sign in and approve the device (enter the visible code if requested). The Deck automatically completes the same device authorization flow already used by browser sign-in. QR rendering stays local; no QR image service receives the sign-in URL. Expired QR codes are removed, and the browser link remains available as a fallback.
+
+### Application branding
+
+The visible app and Steam library name is DIMENSIONAL. Legacy directory names, package identifiers and existing Steam shortcut IDs remain stable so credentials, recordings and controller configurations survive the rename. Steam assets are in desktop/assets/steam; the icon master is desktop/assets/icon.png.
+
+### Robot and session setup
+
+Pick a robot found on the network (or add one), and it connects once with only the required modules while you choose a blueprint: **Teleop** (recommended, fixed) or **Custom**. START adds the selected modules to the same connection, with no second connect. Teleop is always available in a session: W A S D on a keyboard, hold L1 on a Steam Deck. See [robots, blueprints and sessions](docs/SESSION-PROFILES.md).
+
+## Anki Vector
+
+Vector is a separate DimOS embodiment with its own connection, telemetry and skill
+modules. Go2 retains its existing blueprint. Install the `vector` extra and rebuild
+the desktop runtime to include `wirepod-vector-sdk==0.8.1`. See [Vector setup, controls
+and wire-pod voice](docs/VECTOR.md). Existing application bundles are not updated by
+changing source files.

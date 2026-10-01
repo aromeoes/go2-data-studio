@@ -1,3 +1,4 @@
+import { AnalogInput, type Motion } from "./gamepad";
 /** Adapter pinned to DimOS c1c3cdc. Browser robot traffic uses the SDK. */
 import {
   connect,
@@ -12,11 +13,16 @@ export class RobotSDK {
   session: Session | null = null;
   machine: TeleopMachine | null = null;
   camera = "";
+  /** Running totals for the live-stream indicator (frames and JPEG bytes received). */
+  cameraFrames = 0;
+  cameraBytes = 0;
   state: State | null = null;
   ready = false;
   error = "";
   onChange = () => {};
   onArmed = (_armed: boolean) => {};
+  private analog = new AnalogInput();
+  private analogHeld = false;
   private generation = 0;
   private lastStateAt = 0;
   private pending = new Map<
@@ -42,7 +48,15 @@ export class RobotSDK {
     const hooks = teleopHooks(session);
     this.machine = new TeleopMachine(
       { maxLinear: 0.5, maxAngular: 0.5, boost: 1, publishHz: 15 },
-      hooks,
+      {
+        control: (message) => hooks.control(message),
+        datagram: (message) => {
+          hooks.datagram(this.analog.map(message));
+          if (this.analog.selected && this.analogHeld && this.analog.stale()) {
+            queueMicrotask(() => this.disarm());
+          }
+        },
+      },
     );
     this.cleanups.push(hooks.onMsg((msg) => this.machine?.onRelayMsg(msg)));
     this.cleanups.push(
@@ -114,6 +128,8 @@ export class RobotSDK {
       }
     });
     subscribe("color_image", (value: Uint8Array) => {
+      this.cameraFrames++;
+      this.cameraBytes += value.byteLength;
       this.clearCamera();
       this.camera = URL.createObjectURL(
         new Blob([value as BlobPart], { type: "image/jpeg" }),
@@ -200,15 +216,40 @@ export class RobotSDK {
     });
   }
 
+  embodiment: "go2" | "vector" = "go2";
+
+  get inputSource(): "keyboard" | "controller" {
+    return this.analog.selected ? "controller" : "keyboard";
+  }
+  selectInput(source: "keyboard" | "controller") {
+    this.disarm();
+    this.analog.selected = source === "controller";
+  }
+  gamepad(value: Motion) {
+    if (this.embodiment === "vector") value = { ...value, vy: 0 };
+    if (!this.analog.selected || this.machine?.getSnapshot().phase !== "armed")
+      return;
+    this.analog.update(value);
+    const moving = !!(value.vx || value.vy || value.wz);
+    // A single held SDK motion key drives its existing 15 Hz scheduler. Only
+    // nonzero motion datagrams are transformed; lease and zeroing stay upstream.
+    if (moving && !this.analogHeld) this.machine.keyDown("KeyW");
+    if (!moving && this.analogHeld) this.machine.keyUp("KeyW");
+    this.analogHeld = moving;
+  }
   arm(speed: number) {
     if (!this.ready || !this.machine) throw Error("DimOS SDK is disconnected");
     this.machine.config.maxLinear = speed;
+    this.machine.config.maxAngular = this.embodiment === "vector" ? 1.5 : 0.5;
     this.machine.arm();
   }
   disarm() {
+    this.analog.reset();
+    this.analogHeld = false;
     this.machine?.disarm("Controls released");
   }
   keys(pressed: Set<string>) {
+    if (this.analog.selected) return;
     const aliases: Record<string, string> = {
       ArrowUp: "w",
       ArrowDown: "s",
@@ -216,7 +257,11 @@ export class RobotSDK {
       ArrowRight: "d",
     };
     const codes = new Set(
-      [...pressed].map((key) => "Key" + (aliases[key] || key).toUpperCase()),
+      [...pressed]
+        .filter(
+          (key) => this.embodiment !== "vector" || !["q", "e"].includes(key),
+        )
+        .map((key) => "Key" + (aliases[key] || key).toUpperCase()),
     );
     for (const code of ["KeyQ", "KeyW", "KeyE", "KeyA", "KeyS", "KeyD"]) {
       if (codes.has(code)) this.machine?.keyDown(code);
@@ -233,6 +278,10 @@ export class RobotSDK {
     this.cleanups.splice(0).forEach((fn) => fn());
     this.session?.close();
     this.session = null;
+    this.ready = false;
+    this.state = null;
+    this.map = undefined;
+    this.pose = undefined;
     this.clearCamera();
     for (const p of this.pending.values()) {
       clearTimeout(p.timer);

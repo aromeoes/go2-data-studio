@@ -3,6 +3,14 @@ import threading
 import time
 
 
+# Maximum age of an already received Go2 position, LiDAR or map update.
+GO2_SENSOR_TIMEOUT_SECONDS = 10.0
+
+
+def go2_sensor_recent(received: float, now: float) -> bool:
+    return received > 0 and now - received <= GO2_SENSOR_TIMEOUT_SECONDS
+
+
 class Authority:
     """A renewable control lease. Old tokens never become valid again."""
 

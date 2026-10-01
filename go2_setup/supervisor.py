@@ -16,9 +16,13 @@ from dotenv import dotenv_values
 import requests
 
 from go2_setup.catalog import Catalog
+from go2_setup.control import go2_sensor_recent
 from go2_setup.config import Settings
 from go2_setup.diagnostics import FailureDiagnostics
 from go2_setup.records import inspect_recording
+from go2_setup.profiles import profile, require, module_plan
+from go2_setup.robots import Robots
+from go2_setup.vector.errors import read_startup_error
 
 
 class Supervisor:
@@ -46,6 +50,11 @@ class Supervisor:
         self.diagnostics = FailureDiagnostics(settings.root)
         self.retry_count = 0
         self.last_discovery = 0.0
+        self.profile = profile("legacy")
+        self.robot_id = None
+        # Single connection: modules are added to the running session, never by restarting.
+        self.loading_modules = False
+        self.hold = False
         self.env = (
             {
                 k: v
@@ -70,17 +79,27 @@ class Supervisor:
                 self.ip = str(address)
         except (OSError, ValueError, KeyError, TypeError):
             pass
+        self.robots = Robots(settings.root, self.ip, settings.serial)
         threading.Thread(target=self._monitor, daemon=True).start()
+
+    @property
+    def robot_kind(self):
+        return (self.target or {}).get("kind", "go2")
 
     def remember_ip(self):
         """Remember a successful physical connection without resuming it on startup."""
-        if not self.target or self.target.get("replay"):
+        if not self.target or self.target.get("replay") or self.robot_kind != "go2":
             return
         fd, name = tempfile.mkstemp(prefix=".connection-", dir=self.settings.root)
         try:
             with os.fdopen(fd, "w") as file:
-                json.dump({"ip": self.ip, "serial": self.settings.serial}, file)
+                json.dump(
+                    {"ip": self.ip, "serial": self.target.get("serial", self.settings.serial)}, file
+                )
             os.replace(name, self.connection_file)
+            if self.robot_id:
+                robot = self.robots.get(self.robot_id)
+                self.robots.save(robot["name"], self.ip, robot["serial"], ident=self.robot_id)
         finally:
             if os.path.exists(name):
                 os.unlink(name)
@@ -96,12 +115,15 @@ class Supervisor:
             raise ValueError(response.json().get("error", "DimOS error"))
         return response.json()
 
-    def connect(self, ip: str | None = None, replay: str | None = None):
+    def connect(self, ip: str | None = None, replay: str | None = None, robot_id=None, config=None):
         if self.settings.replay_only and not replay:
             raise ValueError("Replay-only instance: physical robot connections are disabled")
         with self.lock:
             if self.target or self.process:
                 raise ValueError("Disconnect the current session first")
+            selected_robot = self.robots.get(robot_id) if robot_id else None
+            if selected_robot:
+                ip = selected_robot["ip"]
             if not replay:
                 address = ipaddress.ip_address(ip or self.ip)
                 if (
@@ -112,13 +134,24 @@ class Supervisor:
                 ):
                     raise ValueError("Enter Go2's private IP address on your Wi-Fi")
                 self.ip = str(address)
-            self.target = {"ip": self.ip, "replay": replay}
+            kind = selected_robot["kind"] if selected_robot else "go2"
+            self.profile = profile(**{**(config or {"preset": "assistant" if kind == "vector" else "legacy"}), "kind": kind})
+            self.robot_id = robot_id
+            self.loading_modules = False
+            self.hold = False
+            self.target = {
+                "kind": kind,
+                "sdk_config": selected_robot.get("sdk_config", "") if selected_robot else "",
+                "ip": self.ip,
+                "replay": replay,
+                "serial": selected_robot["serial"] if selected_robot else self.settings.serial,
+            }
             self.connection = "connecting"
             self.error = None
             self.retry_count = 0
             self.next_retry = 0
             self.catalog.event(
-                "connection", "Replay requested" if replay else "Go2 connection requested"
+                "connection", "Replay requested" if replay else f"{kind} connection requested"
             )
 
     def _launch(self):
@@ -126,7 +159,7 @@ class Supervisor:
             raise ValueError("Replay-only instance: physical robot connections are disabled")
         if not self.target:
             return
-        if not self.target["replay"]:
+        if not self.target["replay"] and self.robot_kind == "go2":
             try:
                 with socket.create_connection((self.ip, 9991), timeout=1):
                     pass
@@ -145,7 +178,7 @@ class Supervisor:
                             },
                         )
                         devices = json.loads(scan.stdout.strip().splitlines()[-1])
-                        candidate = devices.get(self.settings.serial)
+                        candidate = devices.get(self.target.get("serial", self.settings.serial))
                         if candidate and ipaddress.ip_address(candidate).is_private:
                             self.ip = candidate
                             self.target["ip"] = candidate
@@ -159,7 +192,7 @@ class Supervisor:
         args = [
             self.settings.python,
             "-m",
-            "go2_setup.runtime",
+            "go2_setup.vector.runtime" if self.robot_kind == "vector" else "go2_setup.runtime",
             "--port",
             str(self.settings.runtime_port),
             "--navigation-log",
@@ -170,6 +203,7 @@ class Supervisor:
             **os.environ,
             **self.env,
             "GO2_RUNTIME_TOKEN": self.token,
+            "GO2_SESSION_PROFILE": json.dumps(self.profile),
             "GO2_CONSOLE_URL": f"http://127.0.0.1:{self.settings.port}",
             "GO2_RELAY_URL": self.relay.url,
             "GO2_RELAY_KEY": self.relay.robot_token,
@@ -182,6 +216,13 @@ class Supervisor:
             "GIT_CONFIG_KEY_0": "lfs.url",
             "GIT_CONFIG_VALUE_0": "https://github.com/dimensionalOS/dimos.git/info/lfs",
         }
+        if self.robot_kind == "vector":
+            startup_error = self.settings.root / "vector-startup-error.json"
+            startup_error.unlink(missing_ok=True)
+            env["VECTOR_STARTUP_ERROR_FILE"] = str(startup_error)
+            env.pop("UNITREE_AES_128_KEY", None)
+            env.pop("ROBOT_IP", None)
+            env.update(VECTOR_IP=self.ip, VECTOR_SERIAL=self.target["serial"], VECTOR_SDK_CONFIG=self.target["sdk_config"])
         self.process = subprocess.Popen(
             args,
             cwd=self.settings.runtime,
@@ -193,6 +234,7 @@ class Supervisor:
         log.close()
         self.epoch = 0
         self.mode = "idle"
+        self.hold = False
         self.telemetry = {}
         self.connection = "connecting"
         self.started = self.last_ok = time.monotonic()
@@ -208,7 +250,8 @@ class Supervisor:
                 if not process:
                     continue
                 if process.poll() is not None:
-                    self._lost("The DimOS process exited. Check runtime.log.", process)
+                    error = read_startup_error(self.settings.root / "vector-startup-error.json") if self.robot_kind == "vector" else None
+                    self._lost(error or "The DimOS process exited. Check runtime.log.", process)
                     continue
                 try:
                     poll_started = time.monotonic()
@@ -236,7 +279,11 @@ class Supervisor:
                         segment_id=self.segment["id"] if self.segment else None,
                     )
                     odom = telemetry.get("sensors", {}).get("odom", {}).get("received", 0)
-                    if time.time() - odom < 5:
+                    if (
+                        go2_sensor_recent(odom, time.time())
+                        if self.robot_kind == "go2"
+                        else time.time() - odom < 5
+                    ):
                         newly_connected = self.connection != "online"
                         self.connection, self.error = "online", None
                         if newly_connected:
@@ -246,7 +293,7 @@ class Supervisor:
                                 self.catalog.event("config", "Could not save Go2's IP address")
                             self.catalog.event(
                                 "connection",
-                                "Replay ready" if self.target["replay"] else "Go2 connected",
+                                "Replay ready" if self.target["replay"] else ("Vector connected" if self.robot_kind == "vector" else "Go2 connected"),
                             )
                         if self.session and not self.segment:
                             self._begin_segment()
@@ -371,6 +418,8 @@ class Supervisor:
                 self._terminate()
                 self.process = None
                 self.connection = "offline"
+                self.loading_modules = False
+                self.hold = False
                 self.mode = "idle"
                 self.epoch += 1
                 self.telemetry = {}
@@ -378,11 +427,70 @@ class Supervisor:
                 self.catalog.update(self.session["id"], status="closed", ended=time.time())
                 self.session = None
 
+    def add_modules(self, preset, modules):
+        """Start the session: add the selected modules to the running connection.
+
+        Loading runs in the background so telemetry keeps flowing; the profile is
+        recorded first, so a reconnect during loading relaunches with every module.
+        """
+        config = profile(preset, kind=self.robot_kind, modules=modules)
+        with self.lock:
+            if not self.target or self.connection != "online":
+                raise ValueError("Wait for the robot to connect")
+            if self.profile.get("preset") != "base":
+                raise ValueError("The blueprint cannot change once the session has started")
+            if self.loading_modules:
+                raise ValueError("Modules are already loading")
+            if self.mode != "idle" or self.session:
+                raise ValueError("Pause movement and save the recording first")
+            previous, self.profile, self.loading_modules = self.profile, config, True
+            robot_id = self.robot_id
+
+        def load():
+            try:
+                self.call("/modules", {"profile": config}, timeout=180)
+                if robot_id:
+                    self.robots.remember_profile(robot_id, config)
+                self.catalog.event("profile", f"Session started with {len(config['modules'])} modules")
+            except Exception as error:
+                with self.lock:
+                    if self.profile is config:
+                        self.profile = previous
+                    self.error = f"Could not start the session: {error}"
+            finally:
+                with self.lock:
+                    self.loading_modules = False
+
+        threading.Thread(target=load, daemon=True).start()
+        return {"ok": True, "loading": True, "profile": config}
+
+    def set_hold(self, on):
+        """Movement toggle: when on, the robot stays in place in every mode."""
+        with self.lock:
+            if self.connection != "online":
+                raise ValueError("Connect the robot first")
+            self.call("/hold", {"on": bool(on)}, timeout=10)
+            self.hold = bool(on)
+            self.catalog.event("control", "Movement off" if self.hold else "Movement on")
+            return {"ok": True, "hold": self.hold}
+
+    def require_session(self):
+        """Nothing moves before START: the base connection is for choosing modules."""
+        if self.profile.get("preset") == "base":
+            raise ValueError("Start the session before driving")
+        if self.loading_modules:
+            raise ValueError("Modules are loading. Wait a moment.")
+
     def change_mode(self, mode):
         with self.lock:
             if self.connection != "online":
                 raise ValueError("Go2 is not connected")
-            if mode in {"agent", "explore"} and not self.telemetry.get("map"):
+            if mode != "idle":
+                self.require_session()
+            required = {"teleop": "teleop", "agent": "humancli", "explore": "exploration"}.get(mode)
+            if required:
+                require(self.profile, required)
+            if mode == "explore" and not self.telemetry.get("map"):
                 raise ValueError("Wait for the navigation map")
             result = self.call("/mode", {"mode": mode}, timeout=20)
             self.mode, self.epoch = result["mode"], result["epoch"]
@@ -391,6 +499,7 @@ class Supervisor:
 
     def start_recording(self, space_id):
         with self.lock:
+            require(self.profile, "recording")
             if self.session:
                 raise ValueError("A recording session is already active")
             if self.connection != "online":
@@ -403,6 +512,8 @@ class Supervisor:
                 space,
                 status="recording",
                 source="replay" if self.target["replay"] else "robot",
+                robot_id=self.robot_id,
+                profile=self.profile,
             )
             self._begin_segment()
             return self.session
@@ -460,6 +571,13 @@ class Supervisor:
     def snapshot(self):
         telemetry = {k: v for k, v in self.telemetry.items() if k != "camera"}
         return dict(
+            robot_id=self.robot_id,
+            robot_kind=self.robot_kind,
+            profile=self.profile,
+            modules=module_plan(self.profile),
+            selected_modules=self.profile.get("modules"),
+            loading_modules=self.loading_modules,
+            hold=self.hold,
             connection=self.connection,
             error=self.error,
             ip=self.ip,

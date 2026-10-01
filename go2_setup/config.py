@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 import os
 
@@ -7,11 +7,12 @@ MAIN_SHA = "c1c3cdc9d2ee54ca72259465688395699d7d99a2"
 
 @dataclass
 class Settings:
+    desktop_token: str = field(
+        default_factory=lambda: os.environ.get("GO2_DESKTOP_TOKEN", ""), repr=False
+    )
     root: Path = Path(os.environ.get("GO2_SPACES", str(Path.home() / "Go2Spaces")))
     runtime: Path = Path(
-        os.environ.get(
-            "DIMOS_RUNTIME", str(Path(__file__).resolve().parents[2] / "dimos-runtime")
-        )
+        os.environ.get("DIMOS_RUNTIME", str(Path(__file__).resolve().parents[2] / "dimos-runtime"))
     )
     serial: str = os.environ.get("GO2_SERIAL", "")
     port: int = int(os.environ.get("GO2_SETUP_PORT", "8780"))

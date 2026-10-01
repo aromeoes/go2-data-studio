@@ -77,7 +77,7 @@ def test_restart_recovers_catalog_without_resuming_motion(tmp_path):
     assert recovered.get(job["id"])["status"] == "interrupted"
 
 
-def test_physical_disconnect_requires_observed_support_and_idle(tmp_path):
+def test_physical_disconnect_requires_idle_without_posture_confirmation(tmp_path):
     from unittest.mock import Mock
 
     app = create_app(settings(tmp_path))
@@ -86,13 +86,10 @@ def test_physical_disconnect_requires_observed_support_and_idle(tmp_path):
         supervisor.target = {"ip": "192.168.50.42", "replay": None}
         supervisor.next_retry = float("inf")
         supervisor.disconnect = Mock()
-        supervisor.mode = "idle"
-        assert client.post("/api/disconnect", headers=HEADERS).status_code == 409
-        supervisor.disconnect.assert_not_called()
         supervisor.mode = "teleop"
         assert (
             client.post(
-                "/api/disconnect", headers=HEADERS, json={"parked_confirmed": True}
+                "/api/disconnect", headers=HEADERS
             ).status_code
             == 409
         )
@@ -100,7 +97,7 @@ def test_physical_disconnect_requires_observed_support_and_idle(tmp_path):
         supervisor.mode = "idle"
         assert (
             client.post(
-                "/api/disconnect", headers=HEADERS, json={"parked_confirmed": True}
+                "/api/disconnect", headers=HEADERS
             ).status_code
             == 200
         )
@@ -121,6 +118,20 @@ def test_cloud_routes_keep_credentials_private_and_require_local_header(tmp_path
         cloud.begin_login.assert_called_once()
         assert client.post("/api/cloud/uploads/test", headers=HEADERS).json()["percent"] == 0
         cloud.start.assert_called_once_with("test")
+        assert (
+            client.post(
+                "/api/cloud/uploads/test", headers=HEADERS, json={"name": "Office"}
+            ).status_code
+            == 200
+        )
+        cloud.start.assert_called_with("test", name="Office")
+        # The app's Resume button sends an empty JSON object: resume with the saved name.
+        assert client.post("/api/cloud/uploads/test", headers=HEADERS, json={}).status_code == 200
+        cloud.start.assert_called_with("test")
+        assert (
+            client.post("/api/cloud/uploads/test", headers=HEADERS, json={"name": ""}).status_code
+            == 422
+        )
         state = client.get("/api/state").json()
         assert "api_key" not in state["cloud"]
         assert "device_code" not in state["cloud"]
