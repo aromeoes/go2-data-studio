@@ -66,6 +66,25 @@ it never connects on its own. Add robot asks for the hardware, then its fields. 
 recording can be replayed from the same screen, and a Go2 can be connected once
 by IP without saving.
 
+## Connecting to a Go2
+
+- **Encryption key.** Go2 firmware 1.1.15 and newer refuses the LAN handshake
+  without the robot's AES-128 key. Put `UNITREE_AES_128_KEY=<32 hex characters>`
+  in the app's private `robot.env` (on a Mac:
+  `~/Library/Application Support/Go2 Data Studio/robot.env`). It is read at
+  startup, so restart the app after editing. Without it the runtime exits with
+  `AesKeyRequiredError`.
+- **AP mode** works: switch the Go2 to AP mode in the Unitree app (you choose the
+  `GO2-XXXXXX` hotspot name and an 8-digit password), join that network, and use
+  Connect once by IP with `192.168.12.1`. Cloud uploads and HumanCLI need
+  internet, which the Go2's hotspot does not provide.
+- **Office or guest Wi-Fi** often isolates devices from each other. The Go2 then
+  shows up in the Unitree app (Bluetooth or Unitree's cloud) but never answers
+  this app. Use AP mode, a phone hotspot, a private router, or the Go2's wired
+  address `192.168.123.161`.
+- **One app at a time.** Close the Unitree app before connecting; the Go2 rejects
+  a second connection.
+
 ## Spaces
 
 A new data directory starts with a space called "Starting space". Spaces are
@@ -78,8 +97,9 @@ Backend tests cover the catalog rules, the add-only runtime contract, tool
 filtering, the hold, sign out, the Starting space and the start flow. Frontend
 tests cover onboarding, Start Session, always-on keyboard driving, the HumanCLI
 takeover prompt, the movement toggle, recordings and HumanCLI. The full flow was
-exercised in a browser against the real backend on a replay at 1280×800. Physical
-Go2 and Vector sessions need supervised testing.
+exercised in a browser against the real backend on a replay at 1280×800. On
+2026-10-01 a supervised session on a physical Go2 over AP mode worked from the Mac
+app. Vector and the Steam Deck build still need supervised testing.
 
 Go2 control allows a 10-second gap after the last position update (all active
 modes), LiDAR update or costmap update (exploration and agent navigation). The
