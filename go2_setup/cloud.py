@@ -7,6 +7,7 @@ includes committed WAL data; raw recordings are never modified or removed.
 from __future__ import annotations
 
 import hashlib
+import io
 import json
 import logging
 import os
@@ -362,9 +363,12 @@ class CloudBackups:
                 # Use the presigned request as issued. Adding Content-MD5 to a
                 # host-only signature causes S3 to reject it as an unsigned header.
                 # Verify the completed object's SHA-256 through a signed GET below.
+                # Send from a file object, not one 16 MB bytes block: urllib3 applies the
+                # connect timeout to each send, and a whole part cannot cross a slow
+                # uplink in 10 s. Content-Length is still set, as presigned S3 requires.
                 with requests.put(
                     url,
-                    data=data,
+                    data=io.BytesIO(data),
                     timeout=(10, 90),
                     allow_redirects=False,
                 ) as response:

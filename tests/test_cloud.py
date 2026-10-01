@@ -4,6 +4,7 @@ from pathlib import Path
 from unittest.mock import Mock
 
 import pytest
+import requests
 
 from go2_setup.catalog import Catalog, atomic_json
 from go2_setup.cloud import CloudBackups, CloudError, dataset_name, fingerprint
@@ -191,6 +192,11 @@ def test_signed_put_preserves_host_only_signature_without_extra_auth_headers(set
         == "etag"
     )
     headers = put.call_args.kwargs.get("headers", {})
+    # Streamed in small writes, with a fixed length for the presigned PUT.
+    body = put.call_args.kwargs["data"]
+    prepared = requests.Request("PUT", "https://bucket.s3.amazonaws.com/o", data=body).prepare()
+    assert prepared.headers["Content-Length"] == "4" and "Transfer-Encoding" not in prepared.headers
+    assert body.read() == b"part"
     assert "Authorization" not in headers
     assert "Content-MD5" not in headers
     assert put.call_args.kwargs["allow_redirects"] is False
