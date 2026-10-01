@@ -36,7 +36,7 @@ export type ModuleDef = {
   requires: string[];
   /** Always part of a session; cannot be unselected. */
   required?: boolean;
-  /** Why this module cannot run on this robot. Shown disabled. */
+  /** Short reason this module cannot run on this robot. Shown disabled. */
   unavailable?: string;
 };
 
@@ -73,8 +73,8 @@ const go2Modules: ModuleDef[] = [
   { id: "PushToTalk", icons: [Mic], summary: "Voice input to HumanCLI.", official: false, capabilities: ["voice"], requires: [AGENT] },
 ];
 
-const NO_LIDAR = "Needs LiDAR. Vector has none.";
-const go2Only = (id: string, reason = "Go2 only.") => ({
+const NO_LIDAR = "No LiDAR";
+const go2Only = (id: string, reason = "Go2 only") => ({
   ...go2Modules.find((m) => m.id === id)!,
   required: false,
   unavailable: reason,
@@ -93,7 +93,7 @@ const vectorModules: ModuleDef[] = [
   go2Only("WavefrontFrontierExplorer", NO_LIDAR),
   go2Only("PatrollingModule", NO_LIDAR),
   go2Only("NavigationSkillContainer", NO_LIDAR),
-  go2Only("ConsoleBridge", "Recording is not supported on Vector yet."),
+  go2Only("ConsoleBridge", "Not on Vector yet"),
   go2Only("UnitreeSkillContainer"),
 ];
 

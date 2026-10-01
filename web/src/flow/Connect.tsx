@@ -16,8 +16,11 @@ export function Connect({ state, notify, onConnecting }: { state: State; notify:
   const [adding, setAdding] = useState(false);
   const [busy, setBusy] = useState(false);
   const offered = useRef(new Set<string>());
+  const scanId = useRef(0);
 
   async function scan() {
+    // Only the latest scan may update the screen or offer a robot.
+    const id = ++scanId.current;
     setScanning(true);
     try {
       const catalog = await get<SetupCatalog>("/setup");
@@ -30,6 +33,7 @@ export function Connect({ state, notify, onConnecting }: { state: State; notify:
         get<Record<string, string>>("/robots/availability"),
         new Promise((done) => setTimeout(done, 1200)), // Keep the scanning state readable.
       ]);
+      if (id !== scanId.current) return;
       setReach(availability);
       // Offer the first reachable robot once per visit to this screen.
       const first = catalog.robots.find((r) => availability[r.id] === "reachable" && !offered.current.has(r.id));
@@ -40,11 +44,14 @@ export function Connect({ state, notify, onConnecting }: { state: State; notify:
     } catch (e) {
       notify((e as Error).message, "error");
     } finally {
-      setScanning(false);
+      if (id === scanId.current) setScanning(false);
     }
   }
   useEffect(() => {
     void scan();
+    return () => {
+      scanId.current++;
+    };
   }, []);
 
   async function connect(robot: SavedRobot) {

@@ -96,7 +96,7 @@ export function App() {
       {screen === "login" && <Login cloud={state.cloud} notify={push} onBack={() => setScreen("onboarding")} />}
       {screen === "connect" && <Connect state={state} notify={push} onConnecting={() => setScreen("setup")} />}
       {screen === "setup" && (
-        <StartSession state={state} robotName={robotName} notify={push} onStarted={() => setScreen("session")} onBack={() => setScreen("connect")} />
+        <StartSession key={`${state.robot_id}:${state.robot_kind}`} state={state} robotName={robotName} notify={push} onStarted={() => setScreen("session")} onBack={() => setScreen("connect")} />
       )}
       {screen === "session" && (
         <Session state={state} robotName={robotName} spaceId={spaceId} onSpace={setSpaceId} notify={push} onEnded={() => setScreen("connect")} />

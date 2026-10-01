@@ -32,7 +32,8 @@ export function StartSession({
   const sent = useRef(false);
   const failed = useRef(false);
   const locked = blueprints.find((b) => b.id === blueprint)!.locked;
-  const selected = locked ? blueprints.find((b) => b.id === blueprint)!.modules : custom;
+  const available = new Set(modules.filter((m) => !m.unavailable).map((m) => m.id));
+  const selected = (locked ? blueprints.find((b) => b.id === blueprint)!.modules : custom).filter((id) => available.has(id));
   const online = state.connection === "online";
   const connecting = state.connection === "connecting";
   const elapsed = useElapsed(!online);
@@ -115,35 +116,38 @@ export function StartSession({
             <span className="tag">Coming soon</span>
           </div>
           {notice && !locked && <p className="hint" role="status">{notice}</p>}
-          <ul className="modules">
-            {modules.map((m) => {
-              const on = selected.includes(m.id);
-              return (
-                <li key={m.id} className={"module" + (m.official ? " official" : "") + (m.unavailable ? " unavailable" : "")}>
-                  <label>
-                    <input type="checkbox" checked={on} disabled={starting || locked || !!m.required || !!m.unavailable} onChange={(e) => toggle(m, e.target.checked)} />
-                    <span className="module-icons">
-                      {m.icons.map((Icon, i) => (
-                        <Icon key={i} size={18} aria-hidden="true" />
-                      ))}
-                    </span>
-                    <span className="module-text">
+          {(
+            [
+              ["DimOS modules", modules.filter((m) => m.official)],
+              ["App modules", modules.filter((m) => !m.official)],
+            ] as const
+          ).map(([title, group]) => (
+            <section key={title} className="module-group" aria-label={title}>
+              <h3>{title}</h3>
+              <ul className="modules">
+                {[...group.filter((m) => !m.unavailable), ...group.filter((m) => m.unavailable)].map((m) => (
+                  <li key={m.id} className={m.unavailable ? "unavailable" : ""}>
+                    <label>
+                      <input
+                        type="checkbox"
+                        checked={selected.includes(m.id)}
+                        disabled={starting || locked || !!m.required || !!m.unavailable}
+                        onChange={(e) => toggle(m, e.target.checked)}
+                      />
+                      <span className="module-icons">
+                        {m.icons.map((Icon, i) => (
+                          <Icon key={i} size={16} aria-hidden="true" />
+                        ))}
+                      </span>
                       <code>{m.id}</code>
-                      <small>{m.unavailable || m.summary}</small>
-                    </span>
-                    <span className="module-tags">
-                      {m.required && (
-                        <span className="tag">
-                          <Lock size={11} /> Required
-                        </span>
-                      )}
-                      <span className={"tag" + (m.official ? " strong" : "")}>{m.official ? "DimOS" : "App"}</span>
-                    </span>
-                  </label>
-                </li>
-              );
-            })}
-          </ul>
+                      {m.required && <Lock size={13} aria-label="Required" />}
+                      {m.unavailable && <small>{m.unavailable}</small>}
+                    </label>
+                  </li>
+                ))}
+              </ul>
+            </section>
+          ))}
         </section>
         <aside className="card setup-side">
           <div className="preview">

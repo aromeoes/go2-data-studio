@@ -27,8 +27,9 @@ current app (`index.html`) and mock mode (`mock.html`) are unchanged.
 4. **Start Session**: the robot connects in the background with only the
    required modules while the user picks a blueprint. Teleop is recommended and
    fixed; Custom lets you choose modules, adding what they depend on. Modules
-   show their real DimOS (or app) name, icons for what they do, a DimOS or App
-   tag, Required locks, and disabled modules with the reason. The robot picture
+   are a compact checklist in two groups, DimOS modules and App modules: real
+   module name, icons for what they do, a lock on required ones, and modules the
+   robot cannot run disabled with a short reason. The robot picture
    becomes the live camera with frame rate and data rate. START adds the
    selected modules to the same connection. Install community module is
    disabled (coming soon).

@@ -405,45 +405,45 @@ code {
   gap: 8px;
   align-items: center;
 }
+.module-group h3 {
+  margin: 4px 0;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+}
 .modules {
   list-style: none;
   margin: 0;
   padding: 0;
-  display: grid;
-  gap: 6px;
+  columns: 2 260px;
+  column-gap: 16px;
 }
-.module label {
-  display: grid;
-  grid-template-columns: auto 52px minmax(0, 1fr) auto;
+.modules li {
+  break-inside: avoid;
+}
+.modules label {
+  display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 8px 10px;
-  border: 1px solid var(--soft);
-  border-radius: 8px;
+  gap: 8px;
+  min-height: 36px;
+  cursor: pointer;
 }
-.module input {
+.modules input {
   width: 20px;
   height: 20px;
   min-height: 0;
 }
-.module.official label {
-  border-color: var(--line);
-  border-width: 1.5px;
+.modules li.unavailable {
+  opacity: 0.45;
 }
-.module.unavailable label {
-  opacity: 0.5;
-  border-style: dashed;
+.modules small {
+  font-size: 12px;
 }
 .module-icons {
   display: flex;
-  gap: 4px;
-}
-.module-text {
-  display: grid;
-}
-.module-tags {
-  display: flex;
-  gap: 4px;
+  gap: 3px;
+  width: 38px;
 }
 .setup-side {
   display: grid;
