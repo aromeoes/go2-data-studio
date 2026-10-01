@@ -65,7 +65,8 @@ class UnitreeActionBody(BaseModel):
 
 
 class UploadBody(BaseModel):
-    name: str = Field(min_length=1, max_length=120)
+    # Omitted on resume: the upload keeps the name it was started with.
+    name: str | None = Field(default=None, min_length=1, max_length=120)
 
 
 class NameBody(BaseModel):
@@ -326,7 +327,7 @@ def create_app(settings: Settings | None = None):
 
     @app.post("/api/cloud/uploads/{segment_id}")
     def cloud_upload(segment_id: str, body: UploadBody | None = None):
-        return cloud.start(segment_id, name=body.name) if body else cloud.start(segment_id)
+        return cloud.start(segment_id, name=body.name) if body and body.name else cloud.start(segment_id)
 
     @app.post("/api/cloud/uploads/{segment_id}/pause")
     def cloud_pause(segment_id: str):

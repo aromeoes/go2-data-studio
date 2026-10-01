@@ -276,6 +276,23 @@ def test_s3_permanent_rejection_is_not_retried_and_is_redacted(setup, monkeypatc
     put.assert_called_once()
 
 
+def test_connection_drops_are_retried_and_logged_without_secrets(setup, monkeypatch, caplog):
+    import requests
+
+    cloud, _, _ = setup
+    waits = []
+    cloud.stop.wait = lambda seconds: waits.append(seconds) or False
+    secret = "https://bucket.s3.amazonaws.com/object?X-Amz-Signature=secret"
+    failure = requests.ConnectionError(f"Max retries exceeded with url: /object?X-Amz-Signature=secret {secret}")
+    put = Mock(side_effect=failure)
+    monkeypatch.setattr("go2_setup.cloud.requests.put", put)
+    with pytest.raises(CloudError, match="connection failed"):
+        cloud._put(secret, b"part")
+    assert put.call_count == 6 and waits == [1, 2, 4, 8, 16]
+    assert "Cloud part upload attempt 6 failed: ConnectionError" in caplog.text
+    assert "secret" not in caplog.text and "X-Amz" not in caplog.text
+
+
 def test_streamed_download_verifies_actual_bytes_and_rejects_corruption(setup, monkeypatch):
     cloud, _, _ = setup
     expected = hashlib.sha256(b"firstsecond").hexdigest()

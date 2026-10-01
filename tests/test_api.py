@@ -125,6 +125,9 @@ def test_cloud_routes_keep_credentials_private_and_require_local_header(tmp_path
             == 200
         )
         cloud.start.assert_called_with("test", name="Office")
+        # The app's Resume button sends an empty JSON object: resume with the saved name.
+        assert client.post("/api/cloud/uploads/test", headers=HEADERS, json={}).status_code == 200
+        cloud.start.assert_called_with("test")
         assert (
             client.post("/api/cloud/uploads/test", headers=HEADERS, json={"name": ""}).status_code
             == 422

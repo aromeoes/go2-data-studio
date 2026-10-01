@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import os
 from pathlib import Path
 from datetime import datetime, timezone
@@ -24,10 +25,13 @@ import requests
 from go2_setup.catalog import atomic_json
 from go2_setup.records import inspect_recording
 
+log = logging.getLogger(__name__)
+
 API = "https://api.dimensional.org"
 CONSOLE = "https://console.dimensional.org"
 ACTIVE = {"preparing", "uploading", "verifying"}
 PART_SIZE = 16 * 1024 * 1024
+PART_ATTEMPTS = 6
 
 
 class CloudError(ValueError):
@@ -351,7 +355,8 @@ class CloudBackups:
     def _put(self, url, data):
         self.storage_url(url)
         error = "Cloud storage is unreachable. Resume to retry missing parts."
-        for attempt in range(3):
+        # Wi-Fi stalls are common on robots' networks: retry a part for about half a minute.
+        for attempt in range(PART_ATTEMPTS):
             self.check()
             try:
                 # Use the presigned request as issued. Adding Content-MD5 to a
@@ -370,9 +375,12 @@ class CloudBackups:
                     error = self.storage_error(response)
                     if response.status_code != 429 and response.status_code < 500:
                         raise CloudError(error)
-            except requests.RequestException:
+            except requests.RequestException as exc:
                 error = "Cloud storage connection failed. Resume to retry missing parts."
-            if self.stop.wait(attempt + 1):
+                # The exception text can contain the presigned URL and its signature.
+                reason = re.sub(r"https?://\S+|url: \S+|X-Amz-\S+", "<redacted>", str(exc))[:300]
+                log.warning("Cloud part upload attempt %d failed: %s: %s", attempt + 1, type(exc).__name__, reason)
+            if attempt + 1 < PART_ATTEMPTS and self.stop.wait(min(2**attempt, 16)):
                 self.check()
         raise CloudError(error)
 
