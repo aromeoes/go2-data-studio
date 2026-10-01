@@ -41,9 +41,9 @@ permissions to the current user. Never commit or paste the authorization token.
 
 Choose Add robot, Anki Vector, name, LAN IP, serial and local SDK configuration
 path. The default path is `~/.anki_vector/sdk_config.ini`. Connect starts the
-saved preset directly with movement idle; new Vector entries use Agent assistant.
-There is no supported-surface checkbox for Vector. Changing capabilities pauses
-app movement and rebuilds the session. Go2 also applies session changes without posture validation.
+required Vector modules with movement idle; START adds the chosen blueprint's
+modules (for example HumanCLI and VectorSkills) to the same connection.
+There is no supported-surface checkbox for Vector.
 Connection uses TLS with the robot certificate and the robot's own access token.
 wire-pod remains your speech backend; it does not proxy the camera or tread control.
 

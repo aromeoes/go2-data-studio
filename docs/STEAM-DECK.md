@@ -138,19 +138,19 @@ Cloud backup status is independent: map generation runs locally from the saved D
 
 ## HumanCLI skills and patrol demo
 
-Full mode agent exposes DimOS tagging, named navigation, coverage patrol, person
+A Custom blueprint with McpClient and the skill modules exposes DimOS tagging, named navigation, coverage patrol, person
 following, and speech, in addition to recording and exploration. HumanCLI's info
 button lists the enabled tools. Its skill status panel reports asynchronous
 progress and failures.
 
 To demonstrate patrol:
 
-1. Connect Go2, start Full mode agent, and select your space.
+1. Connect Go2, choose Custom with ReplanningAStarPlanner, McpClient and PatrollingModule, press START, and select your space.
 2. Use Teleop to map a connected open area with several meters of clear floor.
 3. Switch to HumanCLI. Say `Start patrolling this area`.
 4. Watch the live destination and skill status. DimOS chooses coverage goals in
    the known area. Keep the control page active so its lease stays valid.
-5. Say `Stop patrol`, switch to Teleop, or use Emergency stop.
+5. Say `Stop patrol`, switch to Teleop, or press B (Space on a keyboard) to stop.
 
 To demonstrate names, say `Remember this as reception`, Teleop to a second clear
 location, switch back to HumanCLI, and say `Go to reception`. Names persist on disk

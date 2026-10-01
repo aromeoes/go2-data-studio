@@ -13,6 +13,9 @@ export class RobotSDK {
   session: Session | null = null;
   machine: TeleopMachine | null = null;
   camera = "";
+  /** Running totals for the live-stream indicator (frames and JPEG bytes received). */
+  cameraFrames = 0;
+  cameraBytes = 0;
   state: State | null = null;
   ready = false;
   error = "";
@@ -125,6 +128,8 @@ export class RobotSDK {
       }
     });
     subscribe("color_image", (value: Uint8Array) => {
+      this.cameraFrames++;
+      this.cameraBytes += value.byteLength;
       this.clearCamera();
       this.camera = URL.createObjectURL(
         new Blob([value as BlobPart], { type: "image/jpeg" }),

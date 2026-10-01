@@ -1,42 +1,86 @@
-# Robots and session profiles
+# Robots, blueprints and sessions
 
-The setup flow is saved robot → passive connection → session preset → optional customization → explicit start. Go2 and Anki Vector have separate capability catalogs. Robot instances are stored separately from spaces and recordings.
+The app flow is: Onboarding (only when signed out) → Log into Dimensional or Stay
+Local → Connect your robot → Start Session → Session. Go2 and Anki Vector have
+separate module catalogs. Robot instances are stored separately from spaces and
+recordings.
 
-## Presets
+## One connection per session
 
-| Preset | Default capabilities |
+Connect starts the runtime with only the required modules (Go2: `GO2Connection`,
+`ControlGate`, `RelayBridgeModule`; Vector: `VectorConnection`,
+`RelayBridgeModule`, `VectorTelemetry`). The camera is live while the user picks a
+blueprint, but nothing can move: control modes, Unitree actions and posture
+changes are refused until the session starts.
+
+START (`POST /api/session/modules`) adds the selected modules to that same
+connection. The supervisor records the new profile, then the runtime deploys only
+the missing DimOS modules into its running coordinator (`/modules` on the
+runtime), hands the profile to `ControlGate` and `ConsoleBridge` over RPC, and
+creates HumanCLI skills. Loading runs in the background so telemetry keeps
+flowing; `loading_modules` in the state reports it. Nothing is removed during a
+session and the blueprint cannot change after it starts. A reconnect relaunches
+the runtime with the full profile.
+
+Verified on a recorded replay: six modules loaded in about 2 seconds in the same
+runtime process, the live costmap appeared, and planner commands reached the
+control gate.
+
+## Blueprints and modules
+
+`go2_setup/blueprints.py` is the catalog the UI shows: module ids are the DimOS
+or app class names, with icons, a short description (shown as a tooltip), whether
+the module is official DimOS or app-built, its dependencies, whether it is
+required, and why it is unavailable on a robot.
+
+| Blueprint | Modules |
 | --- | --- |
-| Teleop + Recording | Manual driving, camera, LiDAR data, live mapping, recording |
-| Full mode agent | All capabilities, including navigation, autonomous exploration, recording, HumanCLI and voice |
+| Teleop (recommended, fixed) | Required modules plus VoxelGridMapper, CostMapper, ConsoleBridge (recording) and UnitreeSkillContainer. No HumanCLI. |
+| Custom | Any selection. Dependencies are added automatically; removing one removes its dependents. Required modules cannot be removed. |
 
-Starting a preset enables capabilities. It never starts movement, exploration or recording. The operator selects Explore or Record separately. Full mode agent includes autonomous exploration; Teleop + Recording can add it through Customize. Last applied settings are saved per robot.
+Separate DimOS modules added at START: VoxelGridMapper, CostMapper,
+ReplanningAStarPlanner and the frontier explorer (`ConsoleExplorer`). The others
+are part of the base connection or app services: ConsoleBridge enables recording,
+McpClient enables HumanCLI, PushToTalk enables voice, and the skill modules
+(NavigationSkillContainer, PatrollingModule, PersonFollowSkillContainer,
+SpeakSkill) decide which HumanCLI tools are offered. Exploration only runs from
+HumanCLI.
 
-Customization is capability-based. Dependencies are added when enabling a dependent feature; removing a prerequisite removes its dependents and explains the change. The backend validates the entire selection independently. Required connection, control, telemetry and SDK modules cannot be removed.
+Vector shows the Go2 mapping and navigation modules disabled ("No LiDAR").
 
-## Actual runtime behavior
+Profiles saved before blueprints have no module list; they keep the capability
+behavior they had.
 
-`profiles.py` defines the supported capability catalog. `runtime.build_blueprint()` compiles it into a real DimOS blueprint. Preview omits mapping and navigation modules. Teleop + Recording includes mapping but omits ReplanningAStarPlanner and ConsoleExplorer. Manual mapping can omit planner and explorer. Camera and LiDAR options control sensor consumption in PassiveGo2Connection; they never command physical LiDAR shutdown. Position updates remain required for control. Connection credentials still come from this installation's existing Go2 configuration.
+## Movement toggle and Stop
 
-ConsoleBridge remains present for telemetry. Its recording helper can only start when recording is enabled. Go2 recording contains enabled sensor streams, odometry, transforms, requested Teleop velocities and final output velocities, using DimOS SqliteStore. Recorded session metadata includes robot ID and profile. The common SDK channel manifest stays stable; disabled sensors produce no application frames. ControlGate independently rejects disabled motion modes.
-
-HumanCLI and voice are application services, not separate blueprint checkboxes pretending to be DimOS modules. HumanCLI advertises and accepts only tools supported by the applied profile. Plain conversation does not require a map. Agent navigation still requires recent odometry, LiDAR and costmap data, and the normal control lease. Voice additionally requires microphone permission and configured OpenAI transcription.
-
-## Reconfiguration
-
-Module changes are staged, not hot-swapped. Applying them requires an online, idle connection and no active recording. Start session applies directly, with no posture validation. The existing guarded connection is closed, then a new runtime starts with the selected profile, remaining idle. Replay reconfiguration restarts the replay. Credentials are not included in saved profiles.
-
-The first Connect starts a camera/status preview blueprint. Consequently the initial Start session also rebuilds the runtime. This is an explicit first-version limitation, avoiding unvalidated live module replacement.
-
-An application restart does not automatically connect or move a robot. A transport reconnect within an existing session retains its capabilities but does not resume movement. Legacy raw-IP connection and replay API clients retain the former full profile for compatibility; the new saved-robot flow always connects in preview mode.
+`POST /api/hold` keeps the robot in place: the Go2 control gate forwards no teleop
+or navigation velocity, and the Vector controller refuses tread driving and ends
+a HumanCLI move. HumanCLI can still answer. Space on the keyboard and B on the
+controller stop the robot and latch until Release stop.
 
 ## Saved robots
 
-`robots.json` lives in the private application data directory. An existing valid saved Go2 IP is imported once as My Go2. Add/Edit accepts a private IPv4 address and optional serial. Check availability tests the saved connection service with a bounded timeout. It reports Reachable, not authenticated identity or readiness for movement. This release does not add a general network scanning screen or simultaneous robot control.
+`robots.json` lives in the private application data directory. Connect your robot
+checks saved robots on the network and offers the first one found for 15 seconds;
+it never connects on its own. Add robot asks for the hardware, then its fields. A
+recording can be replayed from the same screen, and a Go2 can be connected once
+by IP without saving.
+
+## Spaces
+
+A new data directory starts with a space called "Starting space". Spaces are
+chosen and renamed in the session sidebar; the recording bar shows the current
+one.
 
 ## Validation
 
-Tests cover actual DimOS blueprint composition without launching hardware, dependency rejection, robot migration/persistence, guarded profile application, backend capability enforcement, conditional agent tools, stale navigation input, and setup interactions. UI checks use an isolated mock server at 1280×800 and 800×600. Physical Go2 session rebuilds and sensor operation require operator acceptance testing after installation.
+Backend tests cover the catalog rules, the add-only runtime contract, tool
+filtering, the hold, sign out, the Starting space and the start flow. Frontend
+tests cover onboarding, Start Session, always-on keyboard driving, the HumanCLI
+takeover prompt, the movement toggle, recordings and HumanCLI. The full flow was
+exercised in a browser against the real backend on a replay at 1280×800. Physical
+Go2 and Vector sessions need supervised testing.
 
-Go2 control allows a 10-second gap after the last position update (all active modes), LiDAR update or costmap update (exploration and agent navigation). Each required stream must have supplied an initial update. The connection supervisor uses the same 10-second position threshold. Controller release, page control leases, emergency Stop and transport failures retain their independent behavior.
-
-Customize uses compact single-line capability labels. Descriptions and prerequisites are available in hover tooltips; dependency validation is unchanged. Older Drive profiles are migrated to Teleop + Recording with their selected capabilities preserved.
+Go2 control allows a 10-second gap after the last position update (all active
+modes), LiDAR update or costmap update (exploration and agent navigation). The
+connection supervisor uses the same 10-second position threshold.

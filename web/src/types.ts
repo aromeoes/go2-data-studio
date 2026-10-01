@@ -1,3 +1,42 @@
+export type SessionProfile = {
+  preset: string;
+  enabled: string[];
+  kind?: string;
+  modules?: string[];
+};
+export type SavedRobot = {
+  id: string;
+  name: string;
+  kind: string;
+  ip: string;
+  serial: string;
+  sdk_config?: string;
+  profile: SessionProfile;
+};
+/** A module in the Start Session catalog served by the backend. */
+export type ModuleDef = {
+  id: string;
+  icons: string[];
+  summary: string;
+  official: boolean;
+  capabilities: string[];
+  requires: string[];
+  required?: boolean;
+  unavailable?: string;
+};
+export type Blueprint = {
+  id: "teleop" | "custom";
+  name: string;
+  summary: string;
+  recommended: boolean;
+  locked: boolean;
+  modules: string[];
+};
+export type SessionCatalog = { modules: ModuleDef[]; blueprints: Blueprint[] };
+export type SetupCatalog = {
+  robots: SavedRobot[];
+  sessions: Record<"go2" | "vector", SessionCatalog>;
+};
 export type Backup = {
   name?: string;
   filename?: string;
@@ -54,7 +93,13 @@ export type State = {
   vector_services?: { state: string; message: string; host?: string | null; voice_ready?: boolean };
   robot_id?: string | null;
   robot_kind?: "go2" | "vector";
-  profile?: import("./SessionSetup").SessionProfile;
+  profile?: SessionProfile;
+  /** Modules of the running session; null for sessions from before blueprints. */
+  selected_modules?: string[] | null;
+  /** True while START adds modules to the running connection. */
+  loading_modules?: boolean;
+  /** Movement toggle: the robot stays in place while true. */
+  hold?: boolean;
   modules?: string[];
   cloud?: {
     configured: boolean;

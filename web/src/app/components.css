@@ -1,0 +1,394 @@
+/* Styles for components kept from the previous UI, copied unchanged from its style.css. */
+.map-surface {
+  flex: 1;
+  position: relative;
+  min-height: 420px;
+  overflow: hidden;
+}
+.map-surface canvas {
+  position: absolute;
+  width: 100%;
+  height: 100%;
+  display: block;
+  cursor: grab;
+  touch-action: none;
+}
+.map-surface canvas:active {
+  cursor: grabbing;
+}
+.map-empty {
+  position: absolute;
+  top: 49%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 90%;
+  text-align: center;
+  pointer-events: none;
+}
+.radar {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 94px;
+  height: 94px;
+  border: 1px solid #44593f;
+  border-radius: 50%;
+  margin: 0 auto 24px;
+  box-shadow:
+    0 0 0 15px #31432f25,
+    0 0 0 30px #31432f15;
+  color: #a6c898;
+}
+.map-empty h2 {
+  font-size: 21px;
+  font-weight: 450;
+  letter-spacing: -0.4px;
+}
+.map-empty p {
+  font-size: 12px;
+  line-height: 1.8;
+}
+.map-empty > span {
+  font-size: 9px;
+  font-family: monospace;
+  color: #72826c;
+  display: block;
+  margin-top: 20px;
+}
+.map-tools {
+  position: absolute;
+  right: 16px;
+  top: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+.map-tools button {
+  width: 30px;
+  height: 30px;
+  padding: 6px;
+  background: #1c261ee8;
+}
+.map-legend {
+  position: absolute;
+  left: 18px;
+  top: 18px;
+  display: flex;
+  gap: 15px;
+  font-size: 9px;
+  color: #a5b39b;
+  padding: 8px 10px;
+  background: #19211adb;
+  border: 1px solid #2f3b2f;
+  border-radius: 5px;
+}
+.map-legend span {
+  display: flex;
+  gap: 5px;
+  align-items: center;
+}
+.swatch {
+  width: 6px;
+  height: 6px;
+  border-radius: 1px;
+}
+.swatch.free {
+  background: #3b4c3d;
+}
+.swatch.occupied {
+  background: #bed7b1;
+}
+.swatch.unknown {
+  background: #1a211c;
+  border: 1px solid #50604a;
+}
+.error-text {
+  color: var(--danger) !important;
+}
+@media (max-width: 700px) {
+  .map-legend {
+    gap: 9px;
+    font-size: 8px;
+    left: 10px;
+    top: 10px;
+  }
+}
+.vision-settings {
+  margin-bottom: 14px;
+  font-size: 12px;
+}
+.vision-settings summary {
+  cursor: pointer;
+  padding: 8px 0;
+}
+.vision-settings form {
+  display: grid;
+  gap: 8px;
+}
+.vision-settings input {
+  width: 100%;
+  min-width: 0;
+}
+.navigation-status {
+  padding: 12px 15px;
+  border-bottom: 1px solid #303b32;
+}
+.navigation-status strong {
+  font-size: 12px;
+  font-weight: 500;
+}
+.navigation-status p {
+  font-size: 11px;
+  line-height: 1.5;
+  margin: 5px 0;
+  color: #a7b79e;
+}
+.navigation-warning {
+  margin-top: 9px;
+  padding: 8px 10px;
+  background: #423724;
+  border-left: 2px solid #c6a268;
+  border-radius: 3px;
+}
+.navigation-warning small {
+  font-size: 9px;
+  color: #d6bc91;
+}
+.navigation-warning p {
+  color: #e1d2b9;
+}
+.navigation-status summary,
+.motion-details summary {
+  cursor: pointer;
+  font-size: 10px;
+  color: #91a485;
+  padding: 8px 0;
+}
+.navigation-status ol {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.navigation-status li {
+  display: flex;
+  gap: 8px;
+  font-size: 10px;
+  line-height: 1.5;
+  padding: 5px 0;
+  border-top: 1px solid #303b32;
+}
+.navigation-status time {
+  color: #91a485;
+  flex-shrink: 0;
+}
+.backup-control {
+  display: grid;
+  gap: 5px;
+  min-width: 150px;
+  max-width: 230px;
+  font-size: 12px;
+}
+.backup-control small {
+  white-space: normal;
+  overflow-wrap: anywhere;
+  line-height: 1.4;
+}
+.backup-control button {
+  justify-content: center;
+  gap: 5px;
+}
+.backup-control progress {
+  width: 100%;
+  height: 7px;
+  accent-color: #416e45;
+}
+.backup-done {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: #a5d595;
+  font-weight: 600;
+}
+.humancli-help {
+  position: relative;
+  display: inline-flex;
+}
+.humancli-help > button {
+  display: inline-flex;
+  align-items: center;
+  padding: 5px;
+  background: transparent;
+}
+.humancli-help > button:focus-visible {
+  outline: 2px solid var(--accent, #b3d6a4);
+  outline-offset: 2px;
+}
+.humancli-tooltip {
+  position: fixed;
+  z-index: 1000;
+  overflow-y: auto;
+  display: grid;
+  gap: 12px;
+  padding: 16px;
+  background: #202720;
+  color: #e5ebe1;
+  border: 1px solid #52634e;
+  border-radius: 10px;
+  box-shadow: 0 12px 32px #0008;
+  font-size: 12px;
+  line-height: 1.5;
+}
+.humancli-skill {
+  display: grid;
+  gap: 3px;
+}
+.humancli-skill code {
+  color: #b3d6a4;
+  white-space: normal;
+}
+.humancli-skill > span {
+  color: #b6c1b1;
+}
+.agent-model-form {
+  display: grid !important;
+  gap: 10px;
+}
+.agent-model-form label {
+  display: grid;
+  gap: 5px;
+}
+.agent-model-form input,
+.agent-model-form select {
+  width: 100%;
+  min-width: 0;
+}
+.agent-model-form .agent-vision-consent {
+  display: flex;
+  align-items: flex-start;
+}
+.agent-model-form .agent-vision-consent input {
+  width: auto;
+  margin-top: 3px;
+}
+.map-legend {
+  gap: 8px;
+  left: 10px;
+  padding: 6px;
+}
+.visual-panel .map-surface {
+  min-height: 240px;
+}
+.controller-diagram {
+  width: min(100%, 300px);
+  margin: 8px auto;
+}
+.controller-diagram svg {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+.controller-diagram .pad-body {
+  fill: #172019;
+  stroke: #596951;
+  stroke-width: 1.5;
+}
+.controller-diagram .pad-screen {
+  fill: #101610;
+  stroke: #35472f;
+}
+.controller-diagram text {
+  text-anchor: middle;
+  dominant-baseline: auto;
+  pointer-events: none;
+  font-family: inherit;
+}
+.controller-diagram .pad-center-label {
+  fill: #a9c69a;
+  font-size: 14px;
+  letter-spacing: 3px;
+}
+.controller-diagram .pad-center-hint {
+  fill: #74886a;
+  font-size: 6px;
+  letter-spacing: 1px;
+}
+.pad-control rect,
+.pad-control circle {
+  fill: #283528;
+  stroke: #617354;
+  stroke-width: 1;
+}
+.pad-control text {
+  fill: #cedac6;
+  font-size: 9px;
+  font-weight: 600;
+}
+.pad-control .stick-thumb {
+  fill: #3c4e35;
+  stroke: #819675;
+}
+.pad-control.is-active rect,
+.pad-control.is-active circle {
+  fill: #badf9f;
+  stroke: #e1ffd0;
+  stroke-width: 2;
+}
+.pad-control.is-active .stick-thumb {
+  fill: #6b9958;
+}
+.pad-control.is-active text {
+  fill: #15200f;
+}
+.controller-diagram figcaption {
+  min-height: 16px;
+  color: #b9cbb0;
+  font-size: 11px;
+  text-align: center;
+  overflow-wrap: anywhere;
+}
+.controls > .controller-diagram {
+  width: min(100%, 200px);
+  margin: 6px auto;
+}
+.setup-error {
+  color: #f0bca5;
+  padding: 0 16px;
+  font-size: 13px;
+}
+.vector-sensors dl { margin: 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 215px), 1fr)); }
+.vector-sensors dl > div { padding: 12px 16px; border-bottom: 1px solid var(--border, #303535); min-width: 0; }
+.vector-sensors dt { font-size: 12px; opacity: .7; margin-bottom: 6px; }
+.vector-sensors dd { margin: 0; font-size: 15px; overflow-wrap: anywhere; }
+.vector-sensors small { display: block; font-size: 11px; opacity: .65; margin-top: 5px; }
+.vector-sensors.stale dl { opacity: .55; }
+.dataset-name {
+  font-size: 12px;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+dialog.upload-dialog {
+  position: fixed;
+  inset: 0;
+  margin: auto;
+  max-width: min(460px, calc(100vw - 32px));
+  color: var(--text);
+  border: 1px solid #34463d;
+}
+dialog.upload-dialog::backdrop {
+  background: #0009;
+}
+.unitree-actions { margin-top: 16px; border-top: 1px solid #34463d; padding-top: 12px; }
+.unitree-actions summary { cursor: pointer; font-weight: 600; font-size: 13px; }
+.unitree-actions p, .generate-map-action small { font-size: 12px; line-height: 1.5; color: #b0c1b4; }
+.unitree-actions label { display: block; font-size: 12px; margin: 10px 0; }
+.unitree-actions input, .unitree-actions select { width: 100%; margin-top: 6px; }
+.unitree-actions select { padding: 6px; }
+.unitree-actions option { padding: 6px; }
+.generate-map-action small { display: block; max-width: 180px; }
+.robot-skill-status { border: 1px solid var(--line, #30343c); border-radius: 8px; padding: 10px; font-size: 13px; }
+.robot-skill-status [role="status"] { display: grid; gap: 4px; }
+.robot-skill-status strong { text-transform: capitalize; }
+.robot-skill-status details { margin-top: 8px; }
+.robot-skill-status summary { cursor: pointer; }
+.robot-skill-status ul, .robot-skill-status ol { padding-left: 20px; }
+.robot-skill-status li { margin: 6px 0; }

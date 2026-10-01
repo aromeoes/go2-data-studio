@@ -4,7 +4,6 @@ import { createRoot } from "react-dom/client";
 import { act } from "react";
 import { describe, expect, it, vi } from "vitest";
 import { VectorSensors, type VectorReadings } from "./VectorSensors";
-import { TeleopPad } from "./TeleopPad";
 import { robot } from "./sdk";
 (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -77,46 +76,6 @@ describe("Vector UI", () => {
     expect(r.node.textContent).toContain("Lift blocks");
     expect(r.node.textContent).not.toContain("87.0 mm");
     r.close();
-  });
-  it("offers bounded Vector speeds and no strafe buttons, preserving six Go2 keys", () => {
-    const props = {
-      armed: false,
-      speed: 0.1,
-      setSpeed: vi.fn(),
-      disabled: false,
-      pressed: [],
-      toggle: vi.fn(),
-      press: vi.fn(),
-      release: vi.fn(),
-    };
-    const vector = render(<TeleopPad {...props} vector />);
-    expect(vector.node.querySelectorAll(".drive-key")).toHaveLength(4);
-    expect(vector.node.querySelector('option[value="0.12"]')).toBeTruthy();
-    expect(vector.node.querySelector('option[value="1"]')).toBeFalsy();
-    vector.close();
-    const go2 = render(<TeleopPad {...props} speed={0.5} />);
-    expect(go2.node.querySelectorAll(".drive-key")).toHaveLength(6);
-    go2.close();
-  });
-  it("uses L1 instead of an Enable controls button for controller input", () => {
-    robot.selectInput("controller");
-    const r = render(
-      <TeleopPad
-        vector
-        armed={false}
-        speed={0.1}
-        setSpeed={vi.fn()}
-        disabled={false}
-        pressed={[]}
-        toggle={vi.fn()}
-        press={vi.fn()}
-        release={vi.fn()}
-      />,
-    );
-    expect(r.node.textContent).toContain("Hold L1");
-    expect(r.node.textContent).not.toContain("Enable controls");
-    r.close();
-    robot.selectInput("keyboard");
   });
   it("ignores physical Q/E keys for Vector but keeps Go2 strafe", () => {
     const machine = { keyDown: vi.fn(), keyUp: vi.fn() };

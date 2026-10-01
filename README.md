@@ -90,9 +90,9 @@ Uploads contain uncompressed recording databases, not generated maps. Local orig
 
 ## Operating and restarting
 
-Physical operation requires supervision. Before a planned disconnect or software restart, stop movement, save the recording and use Disconnect. Session setup and disconnect do not require posture validation. See [AGENTS.md](AGENTS.md).
+Physical operation requires supervision. Before a planned disconnect or software restart, stop movement, save the recording and use End session. Session setup and disconnect do not require posture validation. See [AGENTS.md](AGENTS.md).
 
-The Stop control is a software stop, not an electrical emergency stop. Network failure, firmware faults or power loss cannot guarantee a controlled posture. Do not automatically reconnect after a fall. Publishing this source does not validate unattended operation.
+Stop (Space or controller B) is a software stop, not an electrical emergency stop. Network failure, firmware faults or power loss cannot guarantee a controlled posture. Do not automatically reconnect after a fall. Publishing this source does not validate unattended operation.
 
 ## Validation
 
@@ -130,7 +130,7 @@ The visible app and Steam library name is DIMENSIONAL. Legacy directory names, p
 
 ### Robot and session setup
 
-Select a saved Go2 (or add its Wi-Fi IP), connect for camera/status, then choose **Teleop + Recording** or **Full mode agent**. Full mode agent includes autonomous exploration. **Customize** selects capabilities and includes their dependencies; **Advanced** shows the underlying modules. Starting a session leaves motion idle and recording off. Applying a profile pauses movement and rebuilds the runtime directly. See [session profiles](docs/SESSION-PROFILES.md) for the module mapping, limitations, and validation.
+Pick a robot found on the network (or add one), and it connects once with only the required modules while you choose a blueprint: **Teleop** (recommended, fixed) or **Custom**. START adds the selected modules to the same connection, with no second connect. Teleop is always available in a session: W A S D on a keyboard, hold L1 on a Steam Deck. See [robots, blueprints and sessions](docs/SESSION-PROFILES.md).
 
 ## Anki Vector
 

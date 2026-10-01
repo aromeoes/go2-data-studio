@@ -1,107 +1,10 @@
 import { useEffect, useId, useRef, useState } from "react";
-import { Cloud, Check, ExternalLink, Pause, Upload } from "lucide-react";
-import { QRCodeSVG } from "qrcode.react";
+import { Check, Pause, Upload } from "lucide-react";
 import type { Item, State } from "./types";
 
 type Action = (name: string, fn: () => Promise<unknown>) => Promise<void>;
 type Api = (path: string, data?: unknown) => Promise<unknown>;
 const gb = (bytes = 0) => (bytes / 1e9).toFixed(2);
-
-export function CloudPanel({
-  cloud,
-  action,
-  api,
-  pending,
-}: {
-  cloud: State["cloud"];
-  action: Action;
-  api: Api;
-  pending: boolean;
-}) {
-  if (!cloud) return null;
-  return (
-    <section className="cloud-panel" aria-label="DimOS Cloud">
-      <div className="cloud-heading">
-        <Cloud size={18} />
-        <strong>DimOS Cloud</strong>
-      </div>
-      <p>
-        {cloud.account?.email ||
-          (cloud.configured
-            ? "Account saved on this device"
-            : "Back up your recordings to the cloud.")}
-      </p>
-      {cloud.login ? (
-        <div role="status" className="cloud-login">
-          <p>Scan with your phone, sign in, and approve this device.</p>
-          {cloud.login.expires_at > Date.now() / 1000 ? (
-            <QRCodeSVG
-              className="cloud-login-qr"
-              value={cloud.login.url}
-              size={192}
-              marginSize={4}
-              level="M"
-              title="Scan to connect this device to DimOS Cloud"
-            />
-          ) : (
-            <p>Code expired. Wait for a new sign-in attempt.</p>
-          )}
-          <small>If asked, enter this code on your phone:</small>
-          <strong className="mono">{cloud.login.code}</strong>
-          <a href={cloud.login.url} target="_blank" rel="noreferrer">
-            Open sign-in <ExternalLink size={13} />
-          </a>
-          <small>
-            Waiting for approval. This code expires in{" "}
-            {Math.max(
-              0,
-              Math.ceil((cloud.login.expires_at - Date.now() / 1000) / 60),
-            )}{" "}
-            min.
-          </small>
-        </div>
-      ) : (
-        <div className="cloud-actions">
-          <button
-            disabled={pending || !!cloud.active_segment}
-            onClick={() =>
-              void action("cloud-login", () => api("/cloud/login"))
-            }
-          >
-            {cloud.configured ? "Sign in again" : "Connect DimOS Cloud"}
-          </button>
-          {cloud.configured && (
-            <button
-              disabled={pending || !!cloud.active_segment}
-              onClick={() =>
-                void action("cloud-check", () => api("/cloud/refresh"))
-              }
-            >
-              Check backups
-            </button>
-          )}
-        </div>
-      )}
-      {cloud.quota && (
-        <small>
-          {gb(cloud.quota.used_total)} GB stored · {cloud.quota.pct}% of cloud
-          quota
-        </small>
-      )}
-      {cloud.error && (
-        <p className="error-text" role="alert">
-          {cloud.error}
-        </p>
-      )}
-      <a href={cloud.console_url} target="_blank" rel="noreferrer">
-        Cloud console <ExternalLink size={12} />
-      </a>
-      <small>
-        Uploads include all recorded sensor streams. Local originals are kept.
-      </small>
-    </section>
-  );
-}
 
 export function BackupControl({
   segment,
