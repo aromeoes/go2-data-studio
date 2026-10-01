@@ -126,7 +126,7 @@ export function StartSession({
               <h3>{title}</h3>
               <ul className="modules">
                 {[...group.filter((m) => !m.unavailable), ...group.filter((m) => m.unavailable)].map((m) => (
-                  <li key={m.id} className={m.unavailable ? "unavailable" : ""}>
+                  <li key={m.id} className={m.unavailable ? "unavailable" : ""} data-tip={m.summary}>
                     <label>
                       <input
                         type="checkbox"

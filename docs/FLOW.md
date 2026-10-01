@@ -29,7 +29,8 @@ current app (`index.html`) and mock mode (`mock.html`) are unchanged.
    fixed; Custom lets you choose modules, adding what they depend on. Modules
    are a compact checklist in two groups, DimOS modules and App modules: real
    module name, icons for what they do, a lock on required ones, and modules the
-   robot cannot run disabled with a short reason. The robot picture
+   robot cannot run disabled with a short reason. Descriptions appear as
+   tooltips on hover or controller focus. The robot picture
    becomes the live camera with frame rate and data rate. START adds the
    selected modules to the same connection. Install community module is
    disabled (coming soon).
@@ -45,7 +46,7 @@ current app (`index.html`) and mock mode (`mock.html`) are unchanged.
 | HumanCLI | Only in blueprints that include `McpClient`. Autonomous exploration and patrol start from HumanCLI. |
 | Taking over | Driving while HumanCLI is moving the robot opens a prompt: Switch to Teleop (stops HumanCLI) or Keep HumanCLI. |
 | Movement toggle | Top right of the control panel. Off keeps the robot in place; HumanCLI can still answer. |
-| Stop | Always visible in the header, also Space and controller B. Latches until Release stop. |
+| Stop | No header button. Space on the keyboard and B on the controller stop the robot and latch until Release stop. The Movement toggle keeps it in place. |
 | End session | Confirms, saves any recording, disconnects and returns to Connect your robot. |
 | Spaces | Chosen in the sidebar. A new device starts with "Starting space". The recording bar shows the current space. |
 | Failures | Toasts: robot unreachable (back to the robot list), connection lost and recovered, camera or LiDAR data stopping and resuming. |

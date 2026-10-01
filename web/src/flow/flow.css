@@ -249,16 +249,21 @@ code {
 .connect {
   display: grid;
   gap: 16px;
-  max-width: 980px;
+  width: fit-content;
+  min-width: min(480px, 100%);
+  max-width: min(980px, 100% - 24px);
   margin: 0 auto 24px;
 }
 .connect > .row h1 {
   flex: 1;
 }
 .robot-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  display: flex;
+  flex-wrap: wrap;
   gap: 12px;
+}
+.robot-grid .robot-card {
+  width: 200px;
 }
 .robot-card {
   display: grid;
@@ -376,7 +381,8 @@ code {
 /* Start Session */
 .setup {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(260px, 340px);
+  grid-template-columns: minmax(0, 620px) 240px;
+  justify-content: center;
   gap: 12px;
   padding: 0 12px 12px;
   align-items: start;
@@ -420,7 +426,26 @@ code {
   column-gap: 16px;
 }
 .modules li {
+  position: relative;
   break-inside: avoid;
+}
+/* Descriptions appear on hover, and on focus for the Steam Deck D-pad. */
+.modules li[data-tip]:hover::after,
+.modules li[data-tip]:focus-within::after {
+  content: attr(data-tip);
+  position: absolute;
+  left: 28px;
+  top: calc(100% - 2px);
+  z-index: 20;
+  width: max-content;
+  max-width: 260px;
+  padding: 6px 10px;
+  border-radius: 6px;
+  background: var(--ink);
+  color: #fff;
+  font-size: 12px;
+  line-height: 1.35;
+  pointer-events: none;
 }
 .modules label {
   display: flex;

@@ -4,7 +4,7 @@
  * the touch pad or L1 take control directly, with no Enable button.
  */
 import { useEffect, useRef, useState, type FormEvent } from "react";
-import { Circle, Menu, Square } from "lucide-react";
+import { Circle, Menu } from "lucide-react";
 import { robot } from "../sdk";
 import type { State } from "../types";
 import { MapCanvas } from "../MapCanvas";
@@ -340,9 +340,6 @@ export function Session({
         <span className="spacer" />
         <span className="muted">{battery}</span>
         <span className={"status " + state.connection}>{online ? "Connected" : state.connection === "reconnecting" ? "Reconnecting" : "Connecting"}</span>
-        <button className="stop" onClick={halt}>
-          <Square size={13} fill="currentColor" /> Stop
-        </button>
         <button onClick={() => setEnding(true)}>End session</button>
       </header>
 
